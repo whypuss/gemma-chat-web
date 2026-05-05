@@ -1,153 +1,207 @@
-# gemma-chat-web
+# gemma-chat-vue
 
-Vue 3 SPA — Chat with local Gemma GGUF model via PicoClaw gateway on Android Termux.
+iOS Light Design System — Vue 3 SPA chatting with local AI (llama.cpp on Android Termux) or any OpenAI-compatible API.
 
-## Architecture
+**Live:** https://gemma-chat-local-agooxo-puss-agooxo-puss-projects.vercel.app
+
+---
+
+## Architecture Overview
 
 ```
-Browser (Vue UI)
-    ↓
-Vercel (frontend hosting)
-    ↓
-Cloudflare Tunnel (trycloudflare.com → phone)
-    ↓
-CORS Proxy (:18080, cors_proxy.py)
-    ↓
-llama.cpp server (:8080)
-    ↓
-Gemma 2B GGUF model (running on Sony SO-51B Android Termux)
+┌─────────────────────────────────────────────────────────┐
+│                    Vue 3 SPA (Vercel)                    │
+│   gemma-chat-vue                                        │
+│   ┌──────────────┐    ┌──────────────────────────────┐  │
+│   │  iOS Design  │    │  Hermes-Style Research      │  │
+│   │  System      │    │  Pipeline                   │  │
+│   │  (CSS vars)  │    │  /v1/research               │  │
+│   └──────────────┘    └──────────────────────────────┘  │
+└────────────┬────────────────────────────────────────────┘
+             │ CORS Proxy (phone) or Direct API URL
+             ▼
+┌─────────────────────────────────────────────────────────┐
+│  Android Termux (Sony SO-51B)                          │
+│  ┌────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │llama.cpp   │  │ CORS Proxy   │  │ DuckDuckGo    │  │
+│  │gemma-2b    │  │ /v1/research │  │ HTML Search   │  │
+│  │context=2048│  │ + Page Fetch │  │ + Text Extr.  │  │
+│  └────────────┘  └──────────────┘  └───────────────┘  │
+│  localhost:8080        :18080                          │
+└────────────┬────────────────────────────────────────────┘
+             │ SSH Reverse Tunnel (localhost.run / Cloudflare)
+             ▼
+┌─────────────────────────────────────────────────────────┐
+│  Public URL (e.g. trycloudflare.com)                   │
+│  HTTPS → Vue SPA → llama.cpp inference                  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-**No cloud AI needed** — fully offline local inference.
+---
 
-## Quick Start
+## Two Connection Modes
 
-### 1. Setup Phone (Android Termux)
+### 1. Local Mode (default)
+- Connect to your **Android phone's CORS proxy** via public tunnel URL
+- Phone runs `llama.cpp` (local Gemma 2B model) + CORS proxy
+- Free inference, no API costs
+- Tunnel: `localhost.run` or `serveo` (SSH reverse tunnel)
 
-```bash
-# Install dependencies
-pkg update && pkg install python  git  openssh  nodejs  npm
+### 2. Direct Mode
+- Connect to **any OpenAI-compatible API endpoint**
+- Built-in `/v1/research` endpoint uses DuckDuckGo HTML search + page content extraction
+- No API keys required for basic use
+- Set: API URL + Model name
 
-# Clone pico
-cd ~
-git clone https://github.com/sipeed/picoclaw
+---
 
-# Install llama.cpp (Q4_K_M GGUF model)
-pip install llama-cpp-python
+## Project Structure
 
-# Download Gemma 2B IT Abliterated
-# From: https://huggingface.co/bartowski/gemma-2-2b-it-abliterated-GGUF
-# Put file as: ~/models/gemma-2-2b-it-abliterated-Q4_K_M.gguf
-
-# Start llama.cpp server
-python3 -m llama_cpp.server --model ~/models/gemma-2-2b-it-abliterated-Q4_K_M.gguf --host 0.0.0.0 --port 8080
-
-# Start CORS proxy (new terminal)
-python3 cors_proxy.py
-
-# Start Cloudflare Tunnel
-/data/data/com.termux/files/usr/bin/cloudflared tunnel --url http://localhost:18080
-# Note the trycloudflare.com URL output
+```
+gemma-chat-web/
+├── index.html              # SPA entry
+├── package.json            # Vue 3 + Vite
+├── vite.config.js          # Vite config (no backend proxy)
+├── vercel.json             # Vercel static deployment
+├── public/                 # Static assets
+└── src/
+    ├── main.js             # Vue app entry
+    ├── App.vue             # Everything: UI + logic + styles
+    └── style.css           # Global resets (minimal)
 ```
 
-### 2. Upload CORS proxy
+---
 
-```bash
-# From THIS repo - cors_proxy.py
-scp cors_proxy.py u0_a409@YOUR_PHONE_IP:/data/data/com.termux/files/home/
+## Design System
+
+iOS Light Design System (pure CSS, no framework):
+
+```css
+--bg: #FFFFFF
+--surface: #F5F5F7
+--accent: #007AFF
+--text: #1D1D1F
+--text2: #86868B
+--border: #E5E5EA
+--radius: 12px
+--shadow: 0 4px 12px rgba(0,0,0,0.08)
 ```
 
-### 3. Deploy Web UI
+**Font stack:** `-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif`
 
+---
+
+## Hermes-Style Research Pipeline
+
+```
+User question
+    │
+    ▼  isSearch() triggers?
+    ├─ NO  → streamChat() direct to model
+    └─ YES → doResearch() pipeline:
+                │
+                ├─ 1. POST /v1/research
+                │     └─ CORS proxy:
+                │           ├─ DuckDuckGo HTML search
+                │           ├─ Fetch top 3 pages (parallel)
+                │           └─ Extract text via regex (no bs4)
+                │
+                ├─ 2. Display research block
+                │     └─ Title + URL + snippet + expandable content
+                │
+                └─ 3. streamChat() with enriched context
+                      └─ System prompt includes full page text
+```
+
+**Response flow:**
+1. Show loading dots
+2. Display research block (3 sources, expandable)
+3. Stream model response (Markdown rendered)
+
+---
+
+## Backend Files (Android Termux)
+
+These stay on the phone, not in this repo:
+
+| File | Purpose |
+|------|---------|
+| `cors_proxy.py` | CORS reverse proxy + `/v1/research` pipeline |
+| `watchdog_llama.sh` | Auto-restart llama.cpp if stuck/OOM |
+| `patch_openai_client.py` | MiniMax streaming fix via `sys.meta_path` |
+| `run_patched_gateway.sh` | Launch Hermes gateway with patched Python path |
+
+### CORS Proxy Endpoints
+
+```
+POST /v1/chat/completions  →  proxy to llama.cpp
+POST /v1/models            →  proxy to llama.cpp
+POST /v1/search            →  DuckDuckGo HTML search (returns snippets)
+POST /v1/research          →  Hermes pipeline: search + fetch + extract + return context
+GET  /test.html            →  Browser test UI
+```
+
+---
+
+## Deployment
+
+### Frontend (Vercel)
 ```bash
 npm install
 npm run build
-# Deploy dist/ to Vercel / Netlify / Cloudflare Pages
+# Deploy dist/ to Vercel (REST API, no CLI needed)
 ```
 
-Or use Vercel REST API (from repo root):
+Or push to GitHub — Vercel auto-deploys.
 
+### Backend (Android Termux)
 ```bash
-curl -X POST https://api.vercel.com/v13/deployments \
-  -H "Authorization: Bearer YOUR_VERCEL_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d @- << 'EOF'
-{
-  "name": "gemma-chat",
-  "files": [{"file": "dist/index.html", "data": "..."}],
-  "projectSettings": {"outputDirectory": "dist", "buildCommand": null}
-}
-EOF
+# Install
+pip install httpx
+
+# Run CORS proxy
+python3 cors_proxy.py
+
+# Run llama.cpp (context=2048 for research support)
+llama-server -m models/gemma-2-2b-it-abliterated-Q4_K_M.gguf \
+  --host 127.0.0.1 --port 8080 -ngl 0 -c 2048
+
+# Tunnel (localhost.run)
+ssh -o StrictHostKeyChecking=no -R 80:localhost:18080 nokey@localhost.run
 ```
 
-### 4. Configure Settings
+---
 
-Open the deployed app → Settings → enter:
+## Configuration
 
-- **API URL**: your trycloudflare.com tunnel URL
-- **Model**: `gemma-2-2b-it-abliterated-Q4_K_M.gguf`
-- **Max Tokens**: 512
+Settings persist in `localStorage` (key: `gc-v4`):
 
-## Features
+| Key | Default | Description |
+|-----|---------|-------------|
+| `connMode` | `local` | `local` or `direct` |
+| `localTunnelUrl` | trycloudflare URL | Phone tunnel endpoint |
+| `directApiUrl` | empty | Direct API base URL |
+| `apiModel` | model filename | Model name |
+| `maxTokens` | 512 | Max completion tokens |
+| `systemPrompt` | Chinese helpful assistant | System prompt |
 
-- 🔍 **Free web search** via DuckDuckGo HTML scraping (no API key)
-- 🤖 **Local GGUF inference** — Gemma 2B on your phone
-- 📱 **Mobile-first** dark theme UI
-- ⚡ **Streaming responses** — tokens appear in real-time
-- 🔄 **Auto-search** — detects questions and searches automatically
-- 📝 **Markdown rendering** — bold, italic, code blocks
-- 💬 **Chat history** — multiple conversations
-
-## API Endpoints (via CORS proxy)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/v1/chat/completions` | POST | OpenAI-compatible chat completions → llama.cpp |
-| `/v1/search` | POST | Free DuckDuckGo search → `{q: "query"}` → `{results: [...]}` |
-
-## PicoClaw Gateway
-
-This app is designed to work WITH PicoClaw running on the same phone:
-
-- **PicoClaw** (port 18790): Agent gateway for Telegram/Discord
-- **llama.cpp** (port 8080): Local LLM inference server
-- **CORS proxy** (port 18080): Bridges web UI to local servers, provides `/v1/search`
-
-### PicoClaw Config (`~/.picoclaw/config.json`)
-
-```json
-{
-  "model_list": [
-    {
-      "model_name": "local-gemma",
-      "provider": "vllm",
-      "model": "gemma-2-2b-it-abliterated-Q4_K_M.gguf",
-      "api_base": "http://localhost:8080/v1",
-      "enabled": true
-    }
-  ],
-  "agents": {
-    "defaults": {
-      "model_name": "local-gemma"
-    }
-  }
-}
-```
-
-## Hardware
-
-- **Phone**: Sony SO-51B (Xperia 1 V) — Android, Termux
-- **Model**: Gemma 2B IT Abliterated Q4_K_M GGUF (~1.6GB)
-- **RAM**: 8GB (running Gemma + llama.cpp + proxy + tunnel)
-- **Tunnel**: Cloudflare Tunnel (trycloudflare.com free tier)
+---
 
 ## Tech Stack
 
-- **Frontend**: Vue 3, Vite, vanilla CSS
-- **Backend**: llama.cpp Python server, FastAPI-style CORS proxy
-- **Hosting**: Vercel (frontend), Android Termux (inference)
-- **Tunnel**: Cloudflare Tunnel (cloudflared)
+- **Frontend:** Vue 3 (Composition API) + Vite
+- **Styling:** Pure CSS, iOS Design System, no framework
+- **Icons:** Inline Lucide SVGs
+- **Backend:** Python 3.13 + httpx on Android Termux
+- **AI:** llama.cpp (local Gemma 2B) or any OpenAI-compatible API
+- **Tunnel:** SSH reverse tunnel (localhost.run / serveo)
+- **Deploy:** Vercel (static SPA)
 
-## License
+---
 
-MIT
+## Known Constraints
+
+- **llama.cpp context:** 2048 tokens max (hardware limited on phone)
+- **Page content:** Truncated to 800 chars/page to fit context
+- **Search:** DuckDuckGo HTML only (no JavaScript rendering)
+- **Tunnel URL:** Changes on reconnect (no fixed domain without paid plan)

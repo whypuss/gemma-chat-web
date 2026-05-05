@@ -1,83 +1,105 @@
 <template>
-  <div class="app-layout">
+  <div class="app">
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="sidebar-header">
-        <h1>gemma-chat</h1>
-        <span>🔍 free search + local gguf</span>
+      <div class="sidebar-head">
+        <div class="app-brand">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M20.188 10.934A8.5 8.5 0 0 1 21 12a8.5 8.5 0 0 1-8.5 8.5 8.5 8.5 0 0 1-8.5-8.5 8.5 8.5 0 0 1 .812-3.866"/><path d="M10.545 5.239A8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 8.5 8.5 8.5 8.5 0 0 1-2.756 6.338"/></svg>
+          <span>gemma</span>
+        </div>
+        <button class="icon-btn" @click="newChat" title="New chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
       </div>
-      <button class="new-chat-btn" @click="newChat">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        New chat
-      </button>
-      <div class="chat-history">
+
+      <div class="chat-list">
         <div
           v-for="(chat, i) in chatHistory"
           :key="i"
-          class="history-item"
+          class="chat-item"
           :class="{ active: i === activeChatIndex }"
           @click="loadChat(i)"
         >
-          {{ chat[0]?.text?.substring(0, 30) || 'New chat' }}...
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {{ chatTitle(chat) }}
         </div>
       </div>
-      <div class="sidebar-footer">
-        Sunny版 · 免費搜索 + 本地模型
+
+      <div class="sidebar-foot">
+        <button class="sidebar-action" @click="showSettings = true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+        <div class="conn-badge" :class="connMode">
+          {{ connMode === 'local' ? '📱' : '☁️' }}
+        </div>
       </div>
     </aside>
 
     <!-- Main -->
     <main class="main">
-      <!-- Header -->
-      <div class="header">
-        <span class="header-title">{{ currentChat.length > 1 ? 'Conversation' : 'New Chat' }}</span>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <span class="header-model">{{ apiModel }}</span>
-          <button class="settings-btn" @click="showSettings = true">Settings</button>
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <span class="model-label">{{ shortModel }}</span>
         </div>
-      </div>
+        <div class="topbar-right">
+          <span class="status-dot" :class="statusClass"></span>
+          <span class="status-label">{{ statusText }}</span>
+        </div>
+      </header>
 
-      <!-- Chat Area -->
-      <div class="chat-area" ref="chatArea">
-        <div v-if="!currentChat.length" class="chat-empty">
-          <div class="logo">🤖</div>
-          <div>Send a message to start chatting</div>
-          <div style="font-size:12px;">Powered by Gemma on your phone · Free web search included</div>
+      <!-- Messages -->
+      <div class="messages" ref="msgEl">
+        <div v-if="!currentChat.length" class="empty">
+          <div class="empty-ico">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M20.188 10.934A8.5 8.5 0 0 1 21 12a8.5 8.5 0 0 1-8.5 8.5 8.5 8.5 0 0 1-8.5-8.5 8.5 8.5 0 0 1 .812-3.866"/><path d="M10.545 5.239A8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 8.5 8.5 8.5 8.5 0 0 1-2.756 6.338"/></svg>
+          </div>
+          <p class="empty-title">Start chatting</p>
+          <p class="empty-sub">Questions auto-search the web</p>
         </div>
 
-        <div
-          v-for="(msg, i) in currentChat"
-          :key="i"
-        >
-          <!-- Search Results Card -->
-          <div v-if="msg.type === 'search_results'" class="search-card">
-            <div class="search-header">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              Web Search · {{ msg.query }}
+        <div v-for="(msg, i) in currentChat" :key="i">
+
+          <!-- Research block (Hermes-style: full page content) -->
+          <div v-if="msg.type === 'research_results'" class="research-block">
+            <div class="research-hdr">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Research
+              <span class="research-q">"{{ msg.query }}"</span>
+              <span class="src-count">{{ msg.research.source_count }} sources</span>
             </div>
-            <div class="search-result" v-for="(r, ri) in msg.results" :key="ri">
-              <a :href="r.url" target="_blank" rel="noopener">{{ r.title }}</a>
-              <p>{{ r.snippet }}</p>
+            <div class="sr-list">
+              <div v-for="(r, ri) in msg.research.results" :key="ri" class="sr-item">
+                <div class="sr-title">
+                  <a :href="r.url" target="_blank" rel="noopener">{{ r.title }}</a>
+                </div>
+                <p class="sr-snippet">{{ r.snippet }}</p>
+                <details v-if="r.content && !r.content.startsWith('[Failed')" class="sr-content">
+                  <summary>Page content</summary>
+                  <div class="sr-content-text">{{ r.content }}</div>
+                </details>
+              </div>
             </div>
           </div>
 
           <!-- Message -->
-          <div
-            v-else
-            class="message"
-            :class="msg.role"
-          >
-            <div class="message-avatar">{{ msg.role === 'user' ? 'U' : msg.role === 'loading' ? '' : 'G' }}</div>
-            <div class="message-content">
+          <div v-else class="msg-row" :class="msg.role">
+            <div class="msg-avatar">{{ msg.role === 'user' ? 'U' : 'G' }}</div>
+            <div class="msg-content">
               <div class="bubble" v-if="msg.role === 'user'">{{ msg.text }}</div>
-              <div class="bubble" v-else-if="msg.role === 'assistant'" v-html="formatContent(msg.text)"></div>
-              <div class="bubble error" v-else-if="msg.role === 'error'">{{ msg.text }}</div>
-              <div class="bubble loading-bubble" v-else-if="msg.role === 'loading'">
-                <span class="loading-dot"></span>
-                <span class="loading-dot"></span>
-                <span class="loading-dot"></span>
+              <div class="bubble" v-else-if="msg.role === 'assistant'" v-html="fmt(msg.text)"></div>
+              <div class="bubble err-bubble" v-else-if="msg.role === 'error'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                {{ msg.text }}
               </div>
-              <div class="meta" v-if="msg.role === 'assistant' && msg.tokens">{{ msg.tokens }} tokens · {{ msg.time }}s</div>
+              <div class="bubble loading-bubble" v-else-if="msg.role === 'loading'">
+                <span class="ldot"></span><span class="ldot"></span><span class="ldot"></span>
+              </div>
+              <div class="msg-meta" v-if="msg.role === 'assistant' && msg.time">
+                {{ msg.tokens || '?' }} tokens · {{ msg.time }}s
+                <span v-if="msg.searchUsed" class="searched-tag">searched</span>
+              </div>
             </div>
           </div>
         </div>
@@ -85,47 +107,93 @@
 
       <!-- Input -->
       <div class="input-area">
-        <div class="input-wrapper">
+        <div class="input-card">
           <div class="input-row">
             <textarea
               id="chat-input"
               v-model="inputText"
-              placeholder="Ask anything... (e.g. 'What is the weather in Macau today?')"
+              placeholder="Ask anything..."
               rows="1"
               @keydown.enter.exact.prevent="sendMessage"
-              @input="autoResize"
+              @input="resize"
               :disabled="loading"
             ></textarea>
             <button class="send-btn" @click="sendMessage" :disabled="loading || !inputText.trim()">
-              <svg v-if="!loading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              <span v-else class="spinner"></span>
+              <svg v-if="!loading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              <span v-else class="spin"></span>
             </button>
           </div>
-          <div class="hint">Enter to send · Shift+Enter for new line · Questions are auto-searched</div>
+          <div class="input-foot">{{ connModeLabel }}</div>
         </div>
       </div>
     </main>
 
-    <!-- Settings Overlay -->
-    <div class="settings-overlay" v-if="showSettings" @click.self="showSettings = false">
-      <div class="settings-panel">
-        <button class="close-btn" @click="showSettings = false">&times;</button>
-        <h2>⚙️ Settings</h2>
+    <!-- Settings Sheet -->
+    <div class="sheet-overlay" v-if="showSettings" @click.self="showSettings = false">
+      <div class="settings-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-head">
+          <h2>Settings</h2>
+          <button class="icon-btn" @click="showSettings = false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="sheet-body">
 
-        <label>API URL</label>
-        <input v-model="apiUrl" placeholder="https://your-tunnel-url.trycloudflare.com" />
+          <!-- Mode -->
+          <div class="field">
+            <div class="field-label">Connection</div>
+            <div class="seg">
+              <button :class="{ on: connMode === 'local' }" @click="connMode = 'local'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                Local
+              </button>
+              <button :class="{ on: connMode === 'direct' }" @click="connMode = 'direct'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                Direct
+              </button>
+            </div>
+          </div>
 
-        <label>Model Name</label>
-        <input v-model="apiModel" placeholder="gemma-2-2b-it-abliterated-Q4_K_M.gguf" />
+          <!-- Local fields -->
+          <template v-if="connMode === 'local'">
+            <div class="field">
+              <div class="field-label">Phone tunnel URL</div>
+              <input v-model="localTunnelUrl" placeholder="https://xxx.trycloudflare.com" />
+            </div>
+            <div class="field">
+              <div class="field-label">Model name</div>
+              <input v-model="apiModel" placeholder="gemma-2-2b-it-abliterated-Q4_K_M.gguf" />
+            </div>
+          </template>
 
-        <label>Max Tokens</label>
-        <input type="number" v-model.number="maxTokens" min="10" max="32768" />
+          <!-- Direct fields -->
+          <template v-else>
+            <div class="field">
+              <div class="field-label">API URL</div>
+              <input v-model="directApiUrl" placeholder="https://api.example.com/v1" />
+            </div>
+            <div class="field">
+              <div class="field-label">Model name</div>
+              <input v-model="apiModel" placeholder="gpt-4o-mini" />
+            </div>
+          </template>
 
-        <label>System Prompt</label>
-        <input v-model="systemPrompt" placeholder="You are a helpful assistant..." />
+          <div class="field">
+            <div class="field-label">Max tokens</div>
+            <input type="number" v-model.number="maxTokens" min="10" max="32768" />
+          </div>
 
-        <div class="settings-hint" style="margin-top:12px;">
-          Search is automatic — no extra config needed. Works for queries with "what", "who", "when", "where", "latest", etc.
+          <div class="field">
+            <div class="field-label">System prompt</div>
+            <textarea v-model="systemPrompt" rows="3" placeholder="You are a helpful assistant..."></textarea>
+          </div>
+
+          <button class="test-btn" @click="testConn" :disabled="testing">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            {{ testing ? 'Testing...' : 'Test connection' }}
+          </button>
+          <div v-if="testMsg" class="test-msg" :class="testOk ? 'ok' : 'err'">{{ testMsg }}</div>
         </div>
       </div>
     </div>
@@ -133,492 +201,844 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 
-const apiUrl = ref('https://invision-dental-reliance-branches.trycloudflare.com')
-const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
-const maxTokens = ref(512)
-const systemPrompt = ref('You are a helpful assistant. When answering questions that need current information, use the search results provided to give accurate answers.')
-const showSettings = ref(false)
+const SK = 'gc-v4'
 
+// ── State ────────────────────────────────────────────────
 const inputText = ref('')
 const loading = ref(false)
-const chatArea = ref(null)
+const msgEl = ref(null)
 const chatHistory = ref([[]])
 const activeChatIndex = ref(0)
+const showSettings = ref(false)
+const testing = ref(false)
+const testMsg = ref('')
+const testOk = ref(false)
+const connReady = ref(true)
 
+// ── Persisted ────────────────────────────────────────────
+const connMode = ref('local')
+const localTunnelUrl = ref('https://invision-dental-reliance-branches.trycloudflare.com')
+const directApiUrl = ref('')
+const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
+const maxTokens = ref(512)
+const systemPrompt = ref('你係一個思想開放、好奇心強的AI助手。回答風格：用繁體中文回答我所有問題。回答要有深度，不只是表面資訊，要分析背後原因、觀點和可能性。樂於提出反直覺的觀點，不怕挑戰主流看法。如果問題有爭議，要展示多個角度。\n\n網絡搜尋優先：如果問題涉及事實、數據、新聞、天氣、價格、最新資訊、特定人物或事件，你必須先上網搵資料，先分析後再輸出。不要靠記憶回答可能過時的資訊，互聯網有的優先用互聯網。搜尋到資料後，先分析資料可靠性和關鍵資訊，再整理成易讀的回答。如果搵唔到相關資料，明確告知，並基於邏輯推理回答，同時說明限制。')
+
+function save() {
+  localStorage.setItem(SK, JSON.stringify({
+    connMode: connMode.value,
+    localTunnelUrl: localTunnelUrl.value,
+    directApiUrl: directApiUrl.value,
+    apiModel: apiModel.value,
+    maxTokens: maxTokens.value,
+    systemPrompt: systemPrompt.value,
+  }))
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SK) || '{}')
+    if (s.connMode) connMode.value = s.connMode
+    if (s.localTunnelUrl) localTunnelUrl.value = s.localTunnelUrl
+    if (s.directApiUrl) directApiUrl.value = s.directApiUrl
+    if (s.apiModel) apiModel.value = s.apiModel
+    if (s.maxTokens) maxTokens.value = s.maxTokens
+    if (s.systemPrompt) systemPrompt.value = s.systemPrompt
+  } catch {}
+}
+onMounted(load)
+
+// ── Computed ─────────────────────────────────────────────
 const currentChat = computed(() => chatHistory.value[activeChatIndex.value])
+const baseUrl = computed(() =>
+  (connMode.value === 'local' ? localTunnelUrl.value : directApiUrl.value).replace(/\/$/, '')
+)
+const shortModel = computed(() => {
+  const m = apiModel.value
+  return m.length > 24 ? m.slice(0, 22) + '…' : m
+})
+const connModeLabel = computed(() => connMode.value === 'local' ? '📱 local mode' : '☁️ direct mode')
+const statusClass = computed(() => loading.value ? 'loading' : connReady.value ? 'ok' : 'err')
+const statusText = computed(() => loading.value ? 'thinking…' : connReady.value ? 'ready' : 'offline')
 
-function newChat() {
-  chatHistory.value.unshift([])
-  activeChatIndex.value = 0
-  inputText.value = ''
+// ── Chat ops ─────────────────────────────────────────────
+function chatTitle(chat) {
+  const u = chat.find(m => m.role === 'user')
+  if (!u) return 'Empty'
+  return u.text.slice(0, 28) || 'Empty'
+}
+function newChat() { chatHistory.value.unshift([]); activeChatIndex.value = 0; inputText.value = '' }
+function loadChat(i) { activeChatIndex.value = i }
+
+// ── Search detection ─────────────────────────────────────
+function isSearch(q) {
+  q = q.trim()
+  if (q.length > 120) return false
+  // Broad triggers — err on side of searching
+  return /^(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|202|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史|最新|最近|今日|今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|幾多|多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論)/i.test(q) || q.includes('?') || /[一二三四五六七八九十百千萬億零〇]/.test(q)
 }
 
-function loadChat(i) {
-  activeChatIndex.value = i
+// ── API ──────────────────────────────────────────────────
+
+// Hermes-style research: search + fetch page content + extract text
+async function doResearch(q) {
+  // Direct mode: use CORS proxy's /v1/research endpoint (Hermes pipeline)
+  if (connMode.value === 'direct') {
+    try {
+      const r = await fetch(baseUrl.value + '/v1/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q })
+      })
+      if (r.ok) {
+        const d = await r.json()
+        return d  // {query, results[], context, source_count}
+      }
+    } catch {}
+    return null
+  }
+  // Local mode: use CORS proxy on phone
+  try {
+    const r = await fetch(baseUrl.value + '/v1/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q })
+    })
+    if (r.ok) return await r.json()
+  } catch {}
+  return null
 }
 
-function isSearchQuery(text) {
-  const q = text.trim()
-  if (q.length > 80) return false
-  // Chinese/English trigger words
-  const searchTriggers = /^(what|who|when|where|why|how|which|whose|latest|new|current|recent|today|now|202[4-9]|yesterday|tomorrow|weather|news|price|stock|score|result|今天|明天|昨天|今日|天氣|天預|天氣|最新|最近|天預|天氣|天气)/i
-  if (searchTriggers.test(q)) return true
-  if (q.includes('?')) return true
-  // Chinese question patterns
-  if (/[一二三四五六七八九十百千萬億零〇]/.test(q) && /[天氣风雨雪冷热温雨晴阴]./.test(q)) return true
-  return false
+async function streamChat(msgs, out) {
+  const ctrl = new AbortController()
+  const id = setTimeout(() => ctrl.abort(), 180000)
+  try {
+    const r = await fetch(baseUrl.value + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: apiModel.value, messages: msgs, max_tokens: maxTokens.value, stream: true }),
+      signal: ctrl.signal
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const reader = r.body.getReader()
+    const dec = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const l of lines) {
+        const t = l.trim()
+        if (!t.startsWith('data: ')) continue
+        const data = t.slice(6)
+        if (data === '[DONE]') continue
+        try {
+          const p = JSON.parse(data)
+          const c = p.choices?.[0]?.delta?.content
+          if (c) { out.text += c; scroll() }
+        } catch {}
+      }
+    }
+  } finally { clearTimeout(id) }
 }
 
+// ── Send ─────────────────────────────────────────────────
 async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || loading.value) return
 
   currentChat.value.push({ role: 'user', text })
   inputText.value = ''
-  autoResize()
+  resize()
   currentChat.value.push({ role: 'loading', text: '' })
-  scrollToBottom()
+  loading.value = true
+  scroll()
+
+  const out = { role: 'assistant', text: '', time: '', tokens: 0, searchUsed: false }
+  currentChat.value.pop()
+  currentChat.value.push(out)
+  const t0 = Date.now()
 
   try {
-    let searchResults = null
-
-    // Auto-detect search query
-    if (isSearchQuery(text)) {
-      currentChat.value.pop()
-      currentChat.value.push({ role: 'loading', text: '', type: 'loading' })
-
-      try {
-        const sr = await fetch(apiUrl.value + '/v1/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: text })
-        })
-        searchResults = await sr.json()
-      } catch (e) {
-        console.warn('Search failed:', e)
-      }
-
-      currentChat.value.pop()
-      if (searchResults?.success && searchResults.results?.length > 0) {
-        currentChat.value.push({
-          type: 'search_results',
-          query: text,
-          results: searchResults.results
-        })
-        scrollToBottom()
-      }
-
-      // Synthesize answer with LLM (streaming)
+    if (isSearch(text)) {
       currentChat.value.push({ role: 'loading', text: '' })
-      const startTime = Date.now()
-      const messages = []
-      if (systemPrompt.value) messages.push({ role: 'system', content: systemPrompt.value })
-      messages.push({
-        role: 'user',
-        content: `Based on these web search results, please answer the question.\n\nSearch results:\n${(searchResults?.results || []).map(r => `Title: ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}`).join('\n\n')}\n\nQuestion: ${text}`
-      })
-
-      const assistantMsg = { role: 'assistant', text: '', tokens: 0, time: 0 }
+      const research = await doResearch(text)
       currentChat.value.pop()
-      currentChat.value.push(assistantMsg)
+      if (research && research.results && research.results.length) {
+        out.searchUsed = true
+        // Show enriched research block with full page content
+        currentChat.value.push({ type: 'research_results', query: text, research })
+        scroll()
+        // System prompt with FULL page content (not just snippets)
+        const sys = {
+          role: 'system',
+          content: `你是一個思想開放、好奇心強的AI助手。請根據以下研究資料，用繁體中文詳細回答用戶問題。
 
-      await streamLLM(messages, assistantMsg, startTime)
+研究資料（來自互聯網搜索）：
+${truncateContext(research.context, 1500)}
+
+請用繁體中文回答。分析資料後再輸出，唔好只係重複，要有自己的見解。`
+        }
+        const msgs = [sys]
+        // Include recent conversation for context
+        const history = currentChat.value
+          .filter(m => ['user','assistant','error'].includes(m.role) && m.text)
+          .slice(-6)  // last 6 messages for context
+        history.forEach(m => msgs.push({ role: m.role, content: m.text }))
+        await streamChat(msgs, out)
+      } else {
+        await streamChat(buildMsgs(text), out)
+      }
     } else {
-      // Direct chat (streaming)
-      currentChat.value.pop()
-      const messages = []
-      if (systemPrompt.value) messages.push({ role: 'system', content: systemPrompt.value })
-      currentChat.value
-        .filter(m => ['user', 'assistant', 'error'].includes(m.role))
-        .forEach(m => messages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text }))
-
-      const assistantMsg = { role: 'assistant', text: '', tokens: 0, time: 0 }
-      currentChat.value.push(assistantMsg)
-      const startTime = Date.now()
-      await streamLLM(messages, assistantMsg, startTime)
+      await streamChat(buildMsgs(text), out)
     }
+    out.time = ((Date.now() - t0) / 1000).toFixed(1)
+    out.tokens = out.text.split(/\s+/).length
   } catch (e) {
     currentChat.value.pop()
-    if (currentChat.value.length && currentChat.value[currentChat.value.length - 1].role === 'loading') {
-      currentChat.value.pop()
-    }
-    currentChat.value.push({ role: 'error', text: 'Network error: ' + e.message })
+    currentChat.value.push({ role: 'error', text: e.message })
   }
 
-  scrollToBottom()
+  loading.value = false
+  scroll()
+  save()
 }
 
-async function streamLLM(messages, msgObj, startTime) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 120000)
+function buildMsgs(userText) {
+  const msgs = []
+  if (systemPrompt.value) msgs.push({ role: 'system', content: systemPrompt.value })
+  currentChat.value.filter(m => ['user','assistant'].includes(m.role) && m.text)
+    .forEach(m => msgs.push({ role: m.role, content: m.text }))
+  return msgs
+}
 
+// ── Test ────────────────────────────────────────────────
+async function testConn() {
+  testing.value = true
+  testMsg.value = ''
   try {
-    const r = await fetch(apiUrl.value + '/v1/chat/completions', {
-      method: 'POST',
+    const r = await fetch(baseUrl.value + '/v1/models', {
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: apiModel.value,
-        messages,
-        max_tokens: maxTokens.value,
-        stream: true
-      }),
-      signal: controller.signal
+      signal: AbortSignal.timeout(10000)
     })
-
-    if (!r.ok) {
-      const err = await r.text()
-      msgObj.text = 'API error: ' + r.status + ' ' + err
-      return
+    if (r.ok) {
+      const d = await r.json()
+      connReady.value = true
+      testMsg.value = `Connected — ${d.data?.[0]?.id || 'ok'}`
+      testOk.value = true
+    } else {
+      connReady.value = false
+      testMsg.value = `HTTP ${r.status}`
+      testOk.value = false
     }
-
-    const reader = r.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let totalTokens = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data: ')) continue
-        const data = trimmed.slice(6).trim()
-        if (data === '[DONE]') continue
-
-        try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          if (content) {
-            msgObj.text += content
-            totalTokens++
-            // Throttle DOM updates to every ~3 chars for smooth streaming
-            if (msgObj.text.length % 3 === 0) scrollToBottom()
-          }
-        } catch (e) {
-          // Skip malformed JSON
-        }
-      }
-    }
-
-    msgObj.tokens = totalTokens
-    msgObj.time = ((Date.now() - startTime) / 1000).toFixed(1)
-    scrollToBottom()
   } catch (e) {
-    msgObj.text = 'Stream error: ' + e.message
-  } finally {
-    clearTimeout(timeout)
-    loading.value = false
+    connReady.value = false
+    testMsg.value = e.message
+    testOk.value = false
   }
+  testing.value = false
 }
 
-function formatContent(text) {
-  if (!text) return ''
-  // Escape HTML
-  let escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  // Bold for **text**
-  escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  // Italic for *text* (but not **)
-  escaped = escaped.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
-  // Code for `text`
-  escaped = escaped.replace(/`(.+?)`/g, '<code>$1</code>')
-  // Line breaks
-  escaped = escaped.replace(/\n/g, '<br>')
-  return escaped
+// ── Helpers ─────────────────────────────────────────────
+function truncateContext(text, maxChars) {
+  // Rough truncation: 1 token ≈ 4 chars in Chinese, stay well under context limit
+  if (!text || text.length <= maxChars) return text
+  // Cut at sentence boundary near maxChars
+  const cut = text.slice(0, maxChars)
+  const lastPeriod = cut.lastIndexOf('。')
+  const lastNewline = cut.lastIndexOf('\n')
+  const cutoff = Math.max(lastPeriod, lastNewline) + 1
+  return text.slice(0, Math.max(cutoff, maxChars * 0.85)) + '\n\n... [內容已截斷]'
 }
-
-function autoResize() {
+function fmt(t) {
+  if (!t) return ''
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>')
+}
+function resize() {
   nextTick(() => {
     const el = document.getElementById('chat-input')
-    if (el) {
-      el.style.height = 'auto'
-      el.style.height = Math.min(el.scrollHeight, 120) + 'px'
-    }
+    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }
   })
 }
-
-function scrollToBottom() {
-  nextTick(() => {
-    if (chatArea.value) chatArea.value.scrollTop = chatArea.value.scrollHeight
-  })
+function scroll() {
+  nextTick(() => { if (msgEl.value) msgEl.value.scrollTop = msgEl.value.scrollHeight })
 }
 </script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
+/* ── iOS Light Design System ──────────────────────────── */
 :root {
-  --bg: #0a0a0f;
-  --sidebar-bg: #10101a;
-  --header-bg: #0f0f18;
-  --border: #1a1a2e;
-  --user-bubble: #2d5a8a;
-  --ai-bubble: #1a1a2a;
-  --text: #e0e0e8;
-  --text-dim: #888;
-  --accent: #4a9eff;
-  --error: #ff6b6b;
-  --search-bg: #0f1a12;
-  --search-border: #1a3020;
+  --bg: #FFFFFF;
+  --surface: #F5F5F7;
+  --surface2: #FAFAFA;
+  --border: #E5E5EA;
+  --border2: #D1D1D6;
+  --text: #1D1D1F;
+  --text2: #86868B;
+  --text3: #AEAEB2;
+  --accent: #007AFF;
+  --accent-bg: rgba(0,122,255,0.08);
+  --err: #FF3B30;
+  --ok: #34C759;
+  --warn: #FF9500;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
 }
 
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-.app-layout { display: flex; height: 100vh; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
 
-/* Sidebar */
-.sidebar { width: 240px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
-.sidebar-header h1 { font-size: 16px; font-weight: 600; color: var(--accent); }
-.sidebar-header span { font-size: 11px; color: var(--text-dim); }
+.app { display: flex; height: 100dvh; overflow: hidden; }
 
-.new-chat-btn {
-  margin: 12px 12px 8px;
-  padding: 8px 12px;
-  background: var(--accent);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
+/* ── Sidebar ──────────────────────────────────────────── */
+.sidebar {
+  width: 210px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: calc(100% - 24px);
+  justify-content: space-between;
+  padding: 18px 14px 14px;
+  border-bottom: 1px solid var(--border);
 }
 
-.chat-history { flex: 1; overflow-y: auto; padding: 0 8px; }
-.history-item {
-  padding: 8px 12px;
-  font-size: 12px;
-  color: var(--text-dim);
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.3px;
+}
+
+.icon-btn {
+  width: 30px; height: 30px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
   cursor: pointer;
-  border-radius: 6px;
-  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .15s;
+  box-shadow: var(--shadow-sm);
+}
+.icon-btn:hover { background: var(--accent); border-color: var(--accent); color: white; }
+
+.chat-list { flex: 1; overflow-y: auto; padding: 8px 8px; }
+.chat-list::-webkit-scrollbar { width: 3px; }
+.chat-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background .12s, color .12s;
+  margin-bottom: 1px;
 }
-.history-item:hover, .history-item.active { background: var(--border); color: var(--text); }
+.chat-item:hover { background: var(--bg); color: var(--text); box-shadow: var(--shadow-sm); }
+.chat-item.active { background: var(--bg); color: var(--accent); box-shadow: var(--shadow-sm); }
 
-.sidebar-footer { padding: 12px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); }
+.sidebar-foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 
-/* Main */
-.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  transition: color .12s, background .12s;
+}
+.sidebar-action:hover { color: var(--text); background: var(--bg); }
 
-.header {
-  padding: 12px 20px;
-  background: var(--header-bg);
+.conn-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Main ─────────────────────────────────────────────── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+/* Topbar */
+.topbar {
+  padding: 13px 20px;
   border-bottom: 1px solid var(--border);
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+  flex-shrink: 0;
+  -webkit-app-region: drag;
 }
-.header-title { font-size: 14px; color: var(--text-dim); }
-.header-model { font-size: 11px; color: var(--accent); background: rgba(74,158,255,0.1); padding: 3px 8px; border-radius: 12px; }
+.topbar-left, .topbar-right { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
 
-.settings-btn {
-  padding: 5px 12px;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  border-radius: 6px;
-  cursor: pointer;
+.model-label {
   font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text2);
+  background: var(--surface);
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
 }
-.settings-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Chat Area */
-.chat-area { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.status-dot.loading { background: var(--warn); animation: pulse 1.5s infinite; }
+.status-dot.err { background: var(--err); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-.chat-empty {
+.status-label { font-size: 12px; color: var(--text2); }
+
+/* Messages */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--bg);
+}
+.messages::-webkit-scrollbar { width: 5px; }
+.messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Empty state */
+.empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  color: var(--text-dim);
-  font-size: 14px;
+  padding-bottom: 60px;
+  gap: 6px;
 }
-.logo { font-size: 48px; }
+.empty-ico { margin-bottom: 6px; }
+.empty-title { font-size: 18px; font-weight: 600; color: var(--text); }
+.empty-sub { font-size: 13px; color: var(--text2); }
 
-/* Messages */
-.message { display: flex; gap: 12px; align-items: flex-start; }
-.message.user { flex-direction: row-reverse; }
-.message-avatar {
-  width: 32px;
-  height: 32px;
+/* Msg rows */
+.msg-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 68%;
+  animation: appear .18s ease;
+}
+@keyframes appear { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.msg-row.user { align-self: flex-end; align-items: flex-end; }
+.msg-row.assistant { align-self: flex-start; align-items: flex-start; }
+
+.msg { display: flex; gap: 10px; align-items: flex-start; }
+.msg-row.user .msg { flex-direction: row-reverse; }
+
+.msg-avatar {
+  width: 30px; height: 30px;
   border-radius: 50%;
-  background: var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   flex-shrink: 0;
+  font-family: var(--font);
 }
-.message.user .message-avatar { background: #4a9eff; color: white; }
-.message.assistant .message-avatar { background: #2d8a4e; color: white; }
-.message.loading .message-avatar { background: var(--border); }
+.msg-row.user .msg-avatar { background: var(--accent); color: white; }
+.msg-row.assistant .msg-avatar { background: var(--surface); border: 1px solid var(--border); color: var(--text2); }
 
-.message-content { max-width: 72%; display: flex; flex-direction: column; gap: 4px; }
-.message.user .message-content { align-items: flex-end; }
-.message.assistant .message-content { align-items: flex-start; }
+.msg-content { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 
+/* Bubbles */
 .bubble {
-  padding: 10px 14px;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.5;
+  padding: 11px 15px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1.55;
   word-break: break-word;
 }
-.message.user .bubble { background: var(--user-bubble); color: white; border-bottom-right-radius: 4px; }
-.message.assistant .bubble { background: var(--ai-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-.bubble.error { background: rgba(255,107,107,0.1); border: 1px solid var(--error); color: var(--error); }
+.msg-row.user .bubble {
+  background: var(--accent);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+.msg-row.assistant .bubble {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.err-bubble {
+  background: rgba(255,59,48,0.06);
+  border: 1px solid rgba(255,59,48,0.2);
+  color: var(--err);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
 
-.loading-bubble { display: flex; gap: 4px; padding: 12px 16px; }
-.loading-dot {
+/* Loading dots */
+.loading-bubble { display: flex; gap: 5px; padding: 12px 16px; }
+.ldot {
   width: 6px; height: 6px;
-  background: var(--text-dim);
+  background: var(--text3);
   border-radius: 50%;
-  animation: bounce 1.2s infinite;
+  animation: bounce 1.3s infinite;
 }
-.loading-dot:nth-child(2) { animation-delay: 0.2s; }
-.loading-dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-6px); opacity: 1; } }
+.ldot:nth-child(2) { animation-delay: .2s; }
+.ldot:nth-child(3) { animation-delay: .4s; }
+@keyframes bounce { 0%,60%,100%{transform:translateY(0);opacity:.35} 30%{transform:translateY(-5px);opacity:1} }
 
-.meta { font-size: 11px; color: var(--text-dim); padding: 0 4px; }
-
-/* Search Card */
-.search-card {
-  background: var(--search-bg);
-  border: 1px solid var(--search-border);
-  border-radius: 10px;
-  overflow: hidden;
-  max-width: 600px;
-}
-.search-header {
-  padding: 8px 12px;
-  background: rgba(74,158,255,0.08);
-  font-size: 12px;
-  color: var(--accent);
+.msg-meta {
+  font-size: 11px;
+  color: var(--text3);
+  padding: 0 2px;
   display: flex;
   align-items: center;
   gap: 6px;
-  border-bottom: 1px solid var(--search-border);
 }
-.search-result { padding: 8px 12px; border-bottom: 1px solid var(--search-border); }
-.search-result:last-child { border-bottom: none; }
-.search-result a { font-size: 13px; color: var(--accent); text-decoration: none; }
-.search-result a:hover { text-decoration: underline; }
-.search-result p { font-size: 12px; color: var(--text-dim); margin-top: 3px; line-height: 1.4; }
+.searched-tag {
+  background: var(--accent-bg);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+}
 
-/* Input Area */
-.input-area { padding: 12px 20px 16px; background: var(--header-bg); border-top: 1px solid var(--border); }
-.input-wrapper { max-width: 800px; margin: 0 auto; }
-.input-row { display: flex; gap: 8px; align-items: flex-end; }
+/* Research block (Hermes-style enriched search) */
+.research-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  max-width: 600px;
+  box-shadow: var(--shadow-sm);
+}
+.research-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.research-q { color: var(--text2); font-style: italic; flex: 1; }
+.src-count {
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 9px;
+  font-weight: 600;
+}
+.sr-list { }
+.sr-item {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sr-item:last-child { border-bottom: none; }
+.sr-title a {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+.sr-title a:hover { text-decoration: underline; }
+.sr-snippet {
+  font-size: 12px;
+  color: var(--text2);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.sr-content {
+  margin-top: 6px;
+}
+.sr-content summary {
+  font-size: 11px;
+  color: var(--text3);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+.sr-content summary:hover { color: var(--accent); }
+.sr-content-text {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Input ────────────────────────────────────────────── */
+.input-area {
+  padding: 14px 20px 18px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.input-card {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.input-row { display: flex; gap: 10px; align-items: flex-end; }
 
 #chat-input {
   flex: 1;
-  padding: 10px 14px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 11px 15px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
   color: var(--text);
-  font-size: 14px;
-  font-family: inherit;
+  font-size: 15px;
+  font-family: var(--font);
   resize: none;
   outline: none;
   max-height: 120px;
+  transition: border-color .15s, box-shadow .15s;
 }
-#chat-input:focus { border-color: var(--accent); }
-#chat-input::placeholder { color: var(--text-dim); }
-#chat-input:disabled { opacity: 0.5; }
+#chat-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+  background: var(--bg);
+}
+#chat-input::placeholder { color: var(--text3); }
+#chat-input:disabled { opacity: .5; }
 
 .send-btn {
-  width: 40px;
-  height: 40px;
+  width: 40px; height: 40px;
   background: var(--accent);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius);
+  color: white;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
   flex-shrink: 0;
+  transition: opacity .15s, transform .1s;
+  box-shadow: var(--shadow-sm);
 }
-.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.send-btn:not(:disabled):hover { background: #3a8eef; }
+.send-btn:not(:disabled):hover { opacity: .88; }
+.send-btn:not(:disabled):active { transform: scale(.94); }
+.send-btn:disabled { opacity: .3; cursor: not-allowed; }
 
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255,255,255,0.3);
+.spin {
+  width: 15px; height: 15px;
+  border: 2px solid rgba(255,255,255,.3);
   border-top-color: white;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin .7s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin { to{transform:rotate(360deg)} }
 
-.hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; text-align: center; }
+.input-foot {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 7px;
+  text-align: center;
+}
 
-/* Settings */
-.settings-overlay {
+/* ── Settings Sheet (iOS Bottom Sheet) ────────────────── */
+.sheet-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 200;
+}
+
+.settings-sheet {
+  background: var(--bg);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  width: 100%;
+  max-width: 540px;
+  max-height: 88dvh;
+  overflow-y: auto;
+  animation: sheetUp .3s cubic-bezier(0.32, 0.72, 0, 1);
+  box-shadow: var(--shadow-lg);
+}
+@keyframes sheetUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+
+.sheet-handle {
+  width: 36px; height: 4px;
+  background: var(--border2);
+  border-radius: 2px;
+  margin: 10px auto 0;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-head h2 { font-size: 17px; font-weight: 600; color: var(--text); }
+
+.sheet-body { padding: 16px 20px 32px; }
+
+.field { margin-bottom: 18px; }
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 7px;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  padding: 10px 13px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.field input:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.field textarea { resize: vertical; min-height: 64px; }
+
+.seg {
+  display: flex;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 3px;
+}
+.seg button {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
-}
-.settings-panel {
-  background: #1a1a2e;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
-  width: 420px;
-  max-width: 90vw;
-  position: relative;
-}
-.close-btn {
-  position: absolute;
-  top: 12px;
-  right: 16px;
+  gap: 6px;
+  padding: 8px 14px;
   background: none;
   border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  cursor: pointer;
-}
-.settings-panel h2 { font-size: 16px; margin-bottom: 16px; color: var(--text); }
-.settings-panel label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; margin-top: 12px; }
-.settings-panel input {
-  width: 100%;
-  padding: 8px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  margin-top: 4px;
+  color: var(--text2);
+  font-size: 14px;
+  font-family: var(--font);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
 }
-.settings-panel input:focus { border-color: var(--accent); outline: none; }
-.settings-hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+.seg button.on {
+  background: var(--bg);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.test-btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 15px;
+  font-family: var(--font);
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 8px;
+  transition: opacity .15s;
+  box-shadow: var(--shadow-sm);
+}
+.test-btn:not(:disabled):hover { opacity: .88; }
+.test-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.test-msg {
+  margin-top: 10px;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.test-msg.ok { background: rgba(52,199,89,0.08); border: 1px solid rgba(52,199,89,0.2); color: var(--ok); }
+.test-msg.err { background: rgba(255,59,48,0.06); border: 1px solid rgba(255,59,48,0.2); color: var(--err); }
+
+/* ── Mobile ───────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .sidebar { display: none; }
+  .msg-row { max-width: 94%; }
+  .search-block { max-width: 94%; }
+  .messages { padding: 16px 14px; }
+}
 </style>
