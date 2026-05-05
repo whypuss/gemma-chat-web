@@ -449,19 +449,26 @@ async function sendMessage() {
         markDone(3)
         stopElapsed()
 
+        // Build clean research briefing from context (strip ref nums, table noise, cap at 1200 chars)
+        const rawCtx = (research.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim()
+        const ctxCap = rawCtx.slice(0, 1200)
+
         const sys = {
           role: 'system',
-          content: `${research.system_prompt || systemPrompt.value}
+          content: `你是一個嚴謹的事實問答助手。
 
-研究資料（已由 Harness 整理，${research.source_count} 個來源，關鍵詞：${(research.keywords || []).slice(0,8).join(', ')}）：
+【重要】你必須只基於以下資料回答，禁止胡說八道。如果資料未提及某信息，明確說「未提及」，禁止猜測。
 
-${research.context}`
+=== 研究資料（${research.source_count} 個來源）===
+${ctxCap}
+=== 資料結束 ===
+
+回答要求：
+- 回答簡潔，用條列式（- 或 1. 2. 3.）
+- 每點不超過兩句
+- 末尾必須標明資料來源：格式如「資料來源：[1]、[2]」`
         }
         const msgs = [sys]
-        const history = currentChat.value
-          .filter(m => ['user','assistant','error'].includes(m.role) && m.text)
-          .slice(-6)
-        history.forEach(m => msgs.push({ role: m.role, content: m.text }))
         researchPhase.value = 'streaming'
 
         // Keep thinking bubble visible during streaming — remove AFTER stream finishes
