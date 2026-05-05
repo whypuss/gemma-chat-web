@@ -23,9 +23,11 @@ import re
 import html
 import random
 import threading
+import queue
 from urllib.parse import urlparse, quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import io
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 PORT             = 18080
@@ -38,10 +40,8 @@ MAX_CONTEXT_TOKENS  = 1800   # per-source token budget (safe for ZH mixed text)
 MAX_CHARS_PER_PAGE  = 3000   # ~1500-1800 tokens for ZH-heavy text
 PARALLEL_FETCHES    = 3
 
-# ─── Shared httpx Client (connection pool — one TCP/TLS handshake reused) ─────
 import httpx
 
-_http_lock = threading.Lock()
 _http_client = httpx.Client(
     timeout=12,
     follow_redirects=True,
@@ -52,6 +52,71 @@ _http_client = httpx.Client(
         keepalive_expiry=60,
     ),
 )
+
+# ─── Inference Queue (GPU mutex — prevents VRAM exhaustion on mobile) ──────────
+# Mobile Adreno GPU can only handle ONE inference at a time under load.
+# This semaphore acts as a global lock: only one request can call llama.cpp at a time.
+# The queue is fair (FIFO): earlier requests get served first.
+_INFERENCE_QUEUE = queue.Queue()
+_inference_sem = threading.Semaphore(1)   # held while llama.cpp is running
+_active_inference_count = 0
+_count_lock = threading.Lock()
+
+
+def _start_inference_worker():
+    """Background daemon thread that runs the inference dispatch loop.
+
+    Uses a queue.Queue (FIFO) to ensure fair ordering:
+    - First waiter in the queue gets the GPU semaphore first
+    - Semaphore(1) guarantees only ONE inference runs at a time
+    - Prevents VRAM exhaustion from concurrent llama.cpp calls on mobile Adreno GPU
+    """
+    def worker():
+        while True:
+            task = _INFERENCE_QUEUE.get()   # blocks until a request arrives
+            if task is None:
+                break
+            msgs_bytes, result_queue = task
+
+            # BLOCK here until the GPU is free (this is the queue's main job)
+            # The queue orders waiting requests; this thread processes them one-by-one
+            _inference_sem.acquire(blocking=True)
+            with _count_lock:
+                global _active_inference_count
+                _active_inference_count += 1
+
+            try:
+                result = _run_sync_inference(msgs_bytes)
+                result_queue.put(('ok', result, _active_inference_count))
+            except Exception as e:
+                result_queue.put(('err', str(e), _active_inference_count))
+            finally:
+                with _count_lock:
+                    _active_inference_count = max(0, _active_inference_count - 1)
+                _inference_sem.release()
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return t
+
+
+def _run_sync_inference(request_body_bytes):
+    """
+    Perform a single synchronous inference call to llama.cpp backend.
+    Called by the inference worker thread while holding the GPU semaphore.
+    Returns raw response bytes from the backend.
+    """
+    req = urllib.request.Request(
+        BACKEND + "/v1/chat/completions",
+        data=request_body_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=240) as resp:
+        return resp.read()
 
 # ─── User-Agent Pool ───────────────────────────────────────────────────────────
 _UA_POOL = [
@@ -591,6 +656,10 @@ class CORSProxyHandler(http.server.BaseHTTPRequestHandler):
             self._handle_search()
         elif parsed.path == "/v1/research":
             self._handle_research()
+        elif parsed.path == "/v1/chat/completions":
+            self._handle_chat_completions()
+        elif parsed.path == "/v1/queue/status":
+            self._handle_queue_status()
         else:
             self._proxy("POST")
 
@@ -620,6 +689,30 @@ class CORSProxyHandler(http.server.BaseHTTPRequestHandler):
             self._json(200, result)
         except Exception as e:
             self._json(500, {"error": str(e)})
+
+    def _handle_chat_completions(self):
+        """Proxy chat completions through the inference queue (GPU mutex)."""
+        try:
+            cl = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(cl) if cl > 0 else b'{}'
+            self._stream_chat_completions(body)
+        except Exception as e:
+            sys.stderr.write(f"[CORS] Chat error: {e}\n")
+            self.send_response(502)
+            self._set_cors()
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
+
+    def _handle_queue_status(self):
+        """Return current queue depth and active count — used by frontend to show queue position."""
+        with _count_lock:
+            active = _active_inference_count
+        qlen = _INFERENCE_QUEUE.qsize()
+        self._json(200, {
+            "queue_depth": qlen,
+            "active_inferences": active,
+            "inference_allowed": True,   # always true; just 1-at-a-time
+        })
 
     def _json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -693,6 +786,44 @@ class CORSProxyHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode())
 
+    # ── Streaming inference with queue ─────────────────────────────────────────
+    def _stream_chat_completions(self, body):
+        """
+        Stream chat completions through the inference queue.
+        Acquires the GPU mutex, then streams from llama.cpp.
+        Sets X-Queue-Position header so frontend can show queue status.
+        """
+        parsed = urlparse(self.path)
+        backend_url = BACKEND + "/v1/chat/completions"
+        if parsed.query:
+            backend_url += "?" + parsed.query
+
+        # Enqueue this request
+        result_q = queue.Queue()
+        _INFERENCE_QUEUE.put((body, result_q))
+
+        # Wait for the inference worker to complete
+        status, result_or_err, queue_pos = result_q.get(timeout=300)
+
+        if status == 'err':
+            self.send_response(502)
+            self._set_cors()
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": result_or_err}).encode())
+            return
+
+        # result_or_err is the full response bytes from llama.cpp
+        content = result_or_err
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("X-Queue-Position", str(queue_pos))
+        self._set_cors()
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        if content:
+            self.wfile.write(content)
+
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
@@ -707,9 +838,12 @@ if __name__ == "__main__":
     print(f"[Harness] HTML: state-machine extractor (no regex hallucination)")
     print(f"[Harness] Keywords: unigram + CJK bigram sliding window")
     print(f"[Harness] Rate-limit backoff: {_ddg_min_interval}s between DDG searches")
+    print(f"[Harness] Inference queue: GPU mutex active (one inference at a time on mobile)")
     print("[Harness] Endpoints:")
-    print("  POST /v1/search    — DuckDuckGo HTML search")
-    print("  POST /v1/research  — Harness: search + parallel fetch + token-budgeted context")
-    print("  POST /v1/chat/completions — llama.cpp proxy")
+    print("  POST /v1/search           — DuckDuckGo HTML search")
+    print("  POST /v1/research         — Harness: search + parallel fetch + token-budgeted context")
+    print("  POST /v1/chat/completions — llama.cpp proxy (queued — GPU mutex)")
+    # Start the background inference queue worker
+    _start_inference_worker()
     server = ThreadedHTTPServer(("", PORT), CORSProxyHandler)
     server.serve_forever()

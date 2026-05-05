@@ -154,7 +154,7 @@
               <span v-else class="spin"></span>
             </button>
           </div>
-          <div class="input-foot">{{ connModeLabel }}</div>
+          <div class="input-foot">{{ connModeLabel }} · {{ searchModeLabel }}</div>
         </div>
       </div>
     </main>
@@ -182,6 +182,22 @@
               <button :class="{ on: connMode === 'direct' }" @click="connMode = 'direct'">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
                 Direct
+              </button>
+            </div>
+          </div>
+
+          <!-- Search mode -->
+          <div class="field">
+            <div class="field-label">Search mode</div>
+            <div class="seg">
+              <button :class="{ on: searchMode === 'auto' }" @click="searchMode = 'auto'" title="自動判斷是否搜索">
+                🔍 自動
+              </button>
+              <button :class="{ on: searchMode === 'always' }" @click="searchMode = 'always'" title="所有問題都先搜索">
+                🌐 總是搜索
+              </button>
+              <button :class="{ on: searchMode === 'never' }" @click="searchMode = 'never'" title="純本地生成，不搜索">
+                🤖 純本地
               </button>
             </div>
           </div>
@@ -295,6 +311,7 @@ const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
 const maxTokens = ref(1024)
+const searchMode = ref('auto')   // 'auto' | 'always' | 'never'
 const systemPrompt = ref('你是一個專業的研究員助手。請嚴格按照以下步驟回答：\n1. 【閱讀】仔細閱讀每個來源的內容，標記關鍵事實和數據\n2. 【對比】如果不同來源有矛盾，標注出來\n3. 【回答】用條列式（- 或 1. 2. 3.）回答用戶問題，禁止胡說八道\n4. 【引用】在回答末尾標明：資料來源：[序号]\n\n重要原則：\n- 如果某個來源沒有提及某信息，明確說「未提及」，而不是猜測\n- 不要摻雜個人意見或猜測，只能基於提供的來源\n- 回答簡潔有力，每點不超過兩句話\n- 如果信息不足，直接說「根據現有資料無法確定」')
 
 function save() {
@@ -304,6 +321,7 @@ function save() {
     directApiUrl: directApiUrl.value,
     apiModel: apiModel.value,
     maxTokens: maxTokens.value,
+    searchMode: searchMode.value,
     systemPrompt: systemPrompt.value,
   }))
 }
@@ -315,6 +333,7 @@ function load() {
     if (s.directApiUrl) directApiUrl.value = s.directApiUrl
     if (s.apiModel) apiModel.value = s.apiModel
     if (s.maxTokens) maxTokens.value = s.maxTokens
+    if (s.searchMode) searchMode.value = s.searchMode
     if (s.systemPrompt) systemPrompt.value = s.systemPrompt
   } catch {}
   // Migrate stale tunnel URLs
@@ -326,7 +345,7 @@ function load() {
 onMounted(load)
 
 // Auto-save settings whenever they change (no need to send a message first)
-watch([connMode, localTunnelUrl, directApiUrl, apiModel, maxTokens], () => save())
+watch([connMode, localTunnelUrl, directApiUrl, apiModel, maxTokens, searchMode], () => save())
 
 // ── Computed ─────────────────────────────────────────────
 const currentChat = computed(() => chatHistory.value[activeChatIndex.value])
@@ -338,6 +357,11 @@ const shortModel = computed(() => {
   return m.length > 24 ? m.slice(0, 22) + '…' : m
 })
 const connModeLabel = computed(() => connMode.value === 'local' ? '📱 local mode' : '☁️ direct mode')
+const searchModeLabel = computed(() => ({
+  auto: '🔍 auto-search',
+  always: '🌐 always search',
+  never: '🤖 local only',
+}[searchMode.value] || ''))
 const statusClass = computed(() => loading.value ? 'loading' : connReady.value ? 'ok' : 'err')
 const statusText = computed(() => loading.value ? 'thinking…' : connReady.value ? 'ready' : 'offline')
 
@@ -499,7 +523,14 @@ async function sendMessage() {
   const markDone = (idx) => { thinkMsg.steps[idx].done = true; scroll() }
 
   try {
-    if (isSearch(text)) {
+    // Determine whether to do web research based on searchMode
+    const doResearch = (() => {
+      if (searchMode.value === 'always') return true
+      if (searchMode.value === 'never') return false
+      return isSearch(text)   // 'auto': use keyword detection
+    })()
+
+    if (doResearch) {
       isResearching.value = true
       researchPhase.value = 'searching'
       startElapsed()
