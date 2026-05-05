@@ -260,6 +260,11 @@ function load() {
     if (s.maxTokens) maxTokens.value = s.maxTokens
     if (s.systemPrompt) systemPrompt.value = s.systemPrompt
   } catch {}
+  // Migrate stale tunnel URLs
+  if (localTunnelUrl.value === 'https://ai.moggy.ccwu.cc') {
+    localTunnelUrl.value = 'https://moggy.moggy.ccwu.cc'
+    save()
+  }
 }
 onMounted(load)
 
