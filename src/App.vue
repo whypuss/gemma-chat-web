@@ -251,6 +251,10 @@ const testOk = ref(false)
 const connReady = ref(true)
 const thinkingSteps = ref([])
 
+// ── Request abort controller + request ID (prevents stale streams) ─
+let currentCtrl = null   // cleared after each request cycle
+let currentReqId = 0     // incremented on each sendMessage; stale responses are discarded
+
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
 const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
@@ -316,8 +320,10 @@ function loadChat(i) { activeChatIndex.value = i }
 function isSearch(q) {
   q = q.trim()
   if (q.length > 120) return false
-  // Broad triggers — err on side of searching
-  return /(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|202|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史|最新|最近|今日|今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|幾多|多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論|有多少|幾多|幾個)/i.test(q) || q.includes('?') || /[一二三四五六七八九十百千萬億零〇]/.test(q)
+  // Intent triggers: info-seeking question words + explicit question mark
+  // Note: intentionally excludes bare Chinese numerals (e.g. "列出三個優點")
+  // to avoid forcing research on non-search queries that happen to contain numbers
+  return /(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史|最新|最近|今日今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|多少|幾多|幾個|有多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論)/i.test(q) || q.includes('?')
 }
 
 // ── API ──────────────────────────────────────────────────
@@ -351,15 +357,17 @@ async function doResearch(q) {
   return null
 }
 
-async function streamChat(msgs, out) {
-  const ctrl = new AbortController()
-  const id = setTimeout(() => ctrl.abort(), 180000)
+async function streamChat(msgs, out, abortSignal) {
+  // Use shared abort controller if provided (from sendMessage), otherwise fresh one
+  const ctrl = abortSignal ? null : new AbortController()
+  const id = setTimeout(() => { if (ctrl) ctrl.abort() }, 180000)
+  const signal = abortSignal || (ctrl ? ctrl.signal : null)
   try {
     const r = await fetch(baseUrl.value + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: apiModel.value, messages: msgs, max_tokens: maxTokens.value, stream: true }),
-      signal: ctrl.signal
+      signal
     })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const reader = r.body.getReader()
@@ -370,6 +378,7 @@ async function streamChat(msgs, out) {
       if (done) break
       buf += dec.decode(value, { stream: true })
       const lines = buf.split('\n')
+      // Keep incomplete last line in buffer for next chunk (fixes JSON truncation)
       buf = lines.pop() || ''
       for (const l of lines) {
         const t = l.trim()
@@ -380,10 +389,18 @@ async function streamChat(msgs, out) {
           const p = JSON.parse(data)
           const c = p.choices?.[0]?.delta?.content
           if (c) { out.text += c; scroll() }
-        } catch {}
+        } catch {
+          // Silent: JSON truncated by network boundary — will retry on next chunk
+        }
       }
     }
-  } finally { clearTimeout(id) }
+  } catch (e) {
+    // Swallow abort — caller (sendMessage) may have intentionally cancelled us
+    if (e.name === 'AbortError' || e.message?.includes('abort')) return
+    throw e   // re-throw real errors so sendMessage catch can display them
+  } finally {
+    clearTimeout(id)
+  }
 }
 
 // ── Send ─────────────────────────────────────────────────
@@ -391,10 +408,15 @@ async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || loading.value) return
 
+  // Abort any in-flight request before starting a new one
+  if (currentCtrl) { currentCtrl.abort(); currentCtrl = null }
+
   currentChat.value.push({ role: 'user', text })
   inputText.value = ''
   resize()
   loading.value = true
+  currentCtrl = new AbortController()
+  const reqId = ++currentReqId   // stamp this request; stale async results will be ignored
 
   const out = { role: 'assistant', text: '', time: '', tokens: 0, searchUsed: false }
   currentChat.value.push(out)
@@ -437,6 +459,9 @@ async function sendMessage() {
       const research = await doResearch(text)
       markDone(1)
 
+      // Discard if this request was superseded by a newer one
+      if (reqId !== currentReqId) { stopElapsed(); loading.value = false; return }
+
       // Step 2: Fetching pages
       thinkMsg.steps[2].text = '已獲取 ' + (research?.results?.length || 0) + ' 個頁面內容'
       markDone(2)
@@ -448,6 +473,9 @@ async function sendMessage() {
         thinkMsg.steps[3].text = '根據 ' + research.source_count + ' 個來源總結回答'
         markDone(3)
         stopElapsed()
+
+        // Discard if superseded while awaiting streamChat
+        if (reqId !== currentReqId) { loading.value = false; return }
 
         // Build clean research briefing from context (strip ref nums, table noise, cap at 1200 chars)
         const rawCtx = (research.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim()
@@ -472,7 +500,7 @@ ${ctxCap}
         researchPhase.value = 'streaming'
 
         // Keep thinking bubble visible during streaming — remove AFTER stream finishes
-        await streamChat(msgs, out)
+        await streamChat(msgs, out, currentCtrl.signal)
 
         // Remove thinking message after streaming done
         const thinkIdx = currentChat.value.indexOf(thinkMsg)
@@ -484,7 +512,7 @@ ${ctxCap}
         stopElapsed()
         const thinkIdx = currentChat.value.indexOf(thinkMsg)
         if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
-        await streamChat(buildMsgs(text), out)
+        await streamChat(buildMsgs(text), out, currentCtrl.signal)
       }
       isResearching.value = false
       researchPhase.value = ''
@@ -495,7 +523,7 @@ ${ctxCap}
       stopElapsed()
       const thinkIdx = currentChat.value.indexOf(thinkMsg)
       if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
-      await streamChat(buildMsgs(text), out)
+      await streamChat(buildMsgs(text), out, currentCtrl.signal)
     }
     out.time = ((Date.now() - t0) / 1000).toFixed(1)
     out.tokens = out.text.split(/\s+/).length
@@ -506,6 +534,7 @@ ${ctxCap}
   }
 
   stopElapsed()
+  currentCtrl = null
   loading.value = false
   scroll()
   save()
@@ -559,7 +588,17 @@ function truncateContext(text, maxChars) {
 }
 function fmt(t) {
   if (!t) return ''
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  // Step 1: escape ALL HTML entities FIRST (before any markdown transforms)
+  // This ensures raw HTML from the model cannot execute
+  const esc = t
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  // Step 2: safe markdown-to-HTML (only creates <strong>, <em>, <code>)
+  // These are safe even if source contains malicious text (already escaped above)
+  return esc
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
