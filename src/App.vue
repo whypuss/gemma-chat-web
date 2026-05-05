@@ -619,9 +619,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--bg);
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   flex-shrink: 0;
   -webkit-app-region: drag;
+  position: relative;
+  z-index: 10;
 }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
 
