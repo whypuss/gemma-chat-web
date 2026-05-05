@@ -85,8 +85,9 @@ def _check_auth(handler):
 # ─── Keyword Extraction ──────────────────────────────────────────────────────
 def _extract_keywords(text, top_n=10):
     """Pull out significant keywords from text (no external deps)."""
-    # Remove common stopwords
+    # Remove common stopwords (expanded for English web content)
     stopwords = {
+        # English common
         "the","a","an","and","or","but","in","on","at","to","for","of","with",
         "by","from","as","is","was","are","were","be","been","being","have",
         "has","had","do","does","did","will","would","could","should","may",
@@ -95,27 +96,38 @@ def _extract_keywords(text, top_n=10):
         "how","all","each","every","both","few","more","most","other","some",
         "such","no","nor","not","only","own","same","so","than","too","very",
         "just","also","now","here","there","then","once","if","because","while",
-        "of","at","by","for","with","about","against","between","into","through",
-        "during","before","after","above","below","up","down","out","off","over",
-        "under","again","further","then","once","and","but","or","nor","so",
-        "yet","both","either","neither","each","few","more","most","other","some",
-        "such","no","not","only","own","same","than","too","very","s","t","d",
-        "ll","re","ve","m","o","y","ain","aren","couldn","didn","doesn","hadn",
-        "hasn","haven","isn","ma","mightn","mustn","needn","shan","shouldn","wasn",
-        "weren","won","wouldn","佢","你","我","佢","我哋","你哋","佢哋","係","喺",
-        "嚟","去","到","嚇","噉","咁","點","點解","點样","幾","幾多","幾時","邊",
-        "邊個","邊度","點解","因為","所以","但係","如果","或者","不過","然後",
-        "然之後","就","就係","就喺","就嚟","就噉"
+        "about","against","between","into","through","during","before","after",
+        "above","below","up","down","out","off","over","under","again","further",
+        "get","got","gets","make","made","makes","take","takes","took","taken",
+        "see","saw","seen","know","knew","known","think","thought","want","wanted",
+        "use","used","using","find","found","give","gave","given","tell","told",
+        "say","said","says","let","lets","look","looked","looking","come","came",
+        "comes","coming","go","goes","went","gone","call","called","calling",
+        "keep","keeps","kept","try","tries","tried","trying","send","sent","send",
+        "put","puts","read","reads","write","writes","wrote","written","writing",
+        # Crypto/financial noise words
+        "price","today","live","chart","market","marketcap","currency","currencies",
+        "cryptocurrency","cryptocurrencies","trading","trader","trades","trade",
+        "bitcoin","btc","ethereum","eth","coin","coins","token","tokens","usd",
+        # HTML/CSS noise
+        "https","http","www","com","org","net","html","css","javascript",
+        # Chinese common
+        "佢","你","我","我哋","你哋","佢哋","係","喺","嚟","去","到","點","點解",
+        "幾","幾多","邊","邊個","因為","所以","但係","如果","或者","不過","然後",
+        "就","就係","就喺","就嚟"
     }
     # Strip tags, lowercase
     clean = re.sub(r'<[^>]+>', '', text).lower()
-    # Split on non-alphanumeric
-    words = re.findall(r'[a-z0-9\u4e00-\u9fff]{3,}', clean)
+    # Split on non-alphanumeric — supports English words + Chinese chars
+    words = re.findall(r'[a-z]{3,}|[0-9]{3,}|[^\x00-\x7F]{2,}', clean)
     freq = {}
     for w in words:
-        if w not in stopwords and not w.isdigit():
-            freq[w] = freq.get(w, 0) + 1
-    # Return top N by frequency
+        w_clean = w.strip().lower()
+        if (w_clean not in stopwords and
+            len(w_clean) >= 3 and
+            not w_clean.isdigit() and
+            not all(c in 'bcdfgklmnpqrstvwxyz' for c in w_clean)):
+            freq[w_clean] = freq.get(w_clean, 0) + 1
     return sorted(freq, key=freq.get, reverse=True)[:top_n]
 
 def _score_relevance(text, keywords):
@@ -123,7 +135,16 @@ def _score_relevance(text, keywords):
     if not keywords or not text:
         return 0
     text_lower = text.lower()
-    return sum(1 for kw in keywords if kw in text_lower)
+    score = 0
+    for kw in keywords:
+        if kw.lower() in text_lower:
+            score += 1
+        # Also check for partial matches (stem-like)
+        if len(kw) > 4:
+            stem = kw[:4]
+            if stem in text_lower:
+                score += 0.5
+    return score
 
 # ─── HTML → Plain text extractor ─────────────────────────────────────────────
 def extract_text_from_html(html_content):
@@ -320,6 +341,10 @@ def run_research(query):
     # Step 2: Extract keywords from all snippets (global topic fingerprint)
     all_snippets = " ".join(r.get("snippet","") for r in results[:8])
     keywords = _extract_keywords(all_snippets, top_n=12)
+    # Fallback: use query words as keywords if extraction gave nothing
+    if not keywords:
+        query_words = [w.strip().lower() for w in query.split() if len(w.strip()) >= 2]
+        keywords = query_words[:8]
 
     # Step 3: Fetch top pages in parallel
     top3 = results[:PARALLEL_FETCHES]
