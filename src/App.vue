@@ -234,7 +234,7 @@ const connReady = ref(true)
 
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
-const localTunnelUrl = ref('https://invision-dental-reliance-branches.trycloudflare.com')
+const localTunnelUrl = ref('https://adoption-transformation-computation-parenting.trycloudflare.com')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
 const maxTokens = ref(1024)
