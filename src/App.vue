@@ -611,8 +611,11 @@ ${ctxCap}
       isResearching.value = false
       researchPhase.value = ''
     } else {
-      // Non-search: just show brief thinking
-      thinkMsg.steps = [ { icon: '🤔', text: '思考中...', done: true } ]
+      // Non-search (never / auto without keyword match): use same thinking bubble
+      // but skip research — just stream directly from local Gemma
+      thinkMsg.steps = [
+        { icon: '🤔', text: '本地推理中...', done: true },
+      ]
       startElapsed()
       stopElapsed()
       const thinkIdx = currentChat.value.indexOf(thinkMsg)
