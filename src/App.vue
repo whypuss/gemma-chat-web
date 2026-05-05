@@ -255,6 +255,40 @@ const thinkingSteps = ref([])
 let currentCtrl = null   // cleared after each request cycle
 let currentReqId = 0     // incremented on each sendMessage; stale responses are discarded
 
+// ── History memory management ────────────────────────────────────────
+// Freeze old messages + cap total history chars to prevent Vue reactive OOM
+const MAX_HISTORY_CHARS = 1500   // ~300-500 tokens for gemma-2b; safe for 1024 ctx
+
+function _freezeAndCap(chat) {
+  // Freeze oldest messages first (oldest = start of array)
+  // Work backwards, freezing until total chars ≤ MAX_HISTORY_CHARS
+  let total = 0
+  const preserved = []
+  for (let i = chat.length - 1; i >= 0; i--) {
+    const m = chat[i]
+    const cost = (m.text || '').length + 40   // 40 = role overhead
+    if (total + cost <= MAX_HISTORY_CHARS) {
+      total += cost
+      preserved.push(m)
+    } else {
+      // Freeze the rest to kill deep-reactivity overhead
+      if (!Object.isFrozen(m)) Object.freeze(m)
+    }
+  }
+  // Reverse: oldest trimmed messages are frozen; preserved ones stay reactive
+  return preserved.reverse()
+}
+
+function trimCurrentChat() {
+  const chat = currentChat.value
+  if (chat.length <= 4) return   // ≤2 exchanges: not worth trimming
+  const trimmed = _freezeAndCap(chat)
+  if (trimmed.length < chat.length) {
+    chat.length = 0
+    chat.push(...trimmed)
+  }
+}
+
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
 const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
@@ -323,44 +357,60 @@ function isSearch(q) {
   // Intent triggers: info-seeking question words + explicit question mark
   // Note: intentionally excludes bare Chinese numerals (e.g. "列出三個優點")
   // to avoid forcing research on non-search queries that happen to contain numbers
-  return /(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史|最新|最近|今日今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|多少|幾多|幾個|有多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論)/i.test(q) || q.includes('?')
+  // Cantonese (廣東話) patterns: 點睇 好唔好 值唔值得 幾時 幾耐 係邊 係咪 聽講 知唔知 etc.
+  return /(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史 最新|最近|今日今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|多少|幾多|幾個|有多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論|點睇|好唔好|值唔值得|幾時|幾耐|可唔可以|可不可以|有無|有冇|係咪|係唔係|聽講|聽說|知唔知|係真假)/i.test(q) || q.includes('?')
 }
 
 // ── API ──────────────────────────────────────────────────
 
 // Hermes-style research: search + fetch page content + extract text
+// NOTE: wraps in AbortSignal.timeout(30000) — if tunnel is假死 (silent drop)
+// without closing the connection, we bail out after 30s instead of hanging forever
 async function doResearch(q) {
-  // Direct mode: use CORS proxy's /v1/research endpoint (Hermes pipeline)
-  if (connMode.value === 'direct') {
-    try {
-      const r = await fetch(baseUrl.value + '/v1/research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q })
-      })
-      if (r.ok) {
-        const d = await r.json()
-        return d  // {query, results[], context, source_count}
-      }
-    } catch {}
-    return null
-  }
-  // Local mode: use CORS proxy on phone
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30000)
   try {
-    const r = await fetch(baseUrl.value + '/v1/research', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q })
-    })
-    if (r.ok) return await r.json()
-  } catch {}
+    if (connMode.value === 'direct') {
+      try {
+        const r = await fetch(baseUrl.value + '/v1/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (r.ok) return await r.json()
+      } catch (e) {
+        clearTimeout(timer)
+        if (e.name === 'AbortError') return { research_aborted: true }
+        return null
+      }
+    } else {
+      try {
+        const r = await fetch(baseUrl.value + '/v1/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (r.ok) return await r.json()
+      } catch (e) {
+        clearTimeout(timer)
+        if (e.name === 'AbortError') return { research_aborted: true }
+        return null
+      }
+    }
+  } finally {
+    clearTimeout(timer)
+  }
   return null
 }
 
 async function streamChat(msgs, out, abortSignal) {
   // Use shared abort controller if provided (from sendMessage), otherwise fresh one
   const ctrl = abortSignal ? null : new AbortController()
-  const id = setTimeout(() => { if (ctrl) ctrl.abort() }, 180000)
+  const id = setTimeout(() => { if (ctrl) ctrl.abort() }, 60000)   // 60s max streaming
   const signal = abortSignal || (ctrl ? ctrl.signal : null)
   try {
     const r = await fetch(baseUrl.value + '/v1/chat/completions', {
@@ -477,6 +527,19 @@ async function sendMessage() {
         // Discard if superseded while awaiting streamChat
         if (reqId !== currentReqId) { loading.value = false; return }
 
+        // Handle timeout / abort: if tunnel was假死, show clear error
+        if (research?.research_aborted) {
+          stopElapsed()
+          const thinkIdx = currentChat.value.indexOf(thinkMsg)
+          if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
+          currentChat.value.push({ role: 'error', text: '搜索超時（30秒無響應），請檢查隧道連接是否正常。' })
+          isResearching.value = false
+          researchPhase.value = ''
+          loading.value = false
+          scroll()
+          return
+        }
+
         // Build clean research briefing from context (strip ref nums, table noise, cap at 1200 chars)
         const rawCtx = (research.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim()
         const ctxCap = rawCtx.slice(0, 1200)
@@ -527,6 +590,8 @@ ${ctxCap}
     }
     out.time = ((Date.now() - t0) / 1000).toFixed(1)
     out.tokens = out.text.split(/\s+/).length
+    // Freeze + cap history to prevent Vue reactive OOM on long conversations
+    trimCurrentChat()
   } catch (e) {
     const thinkIdx = currentChat.value.indexOf(thinkMsg)
     if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
