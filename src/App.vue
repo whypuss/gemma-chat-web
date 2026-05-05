@@ -109,6 +109,24 @@
                   <span class="ldot"></span><span class="ldot"></span><span class="ldot"></span>
                 </span>
               </div>
+              <!-- Thinking process steps -->
+              <div class="bubble thinking-bubble" v-else-if="msg.type === 'thinking'">
+                <div class="thinking-hdr">
+                  <span class="pulse-dot"></span>
+                  思考中 <span class="thinking-time">{{ msg.elapsed }}s</span>
+                </div>
+                <div class="thinking-steps">
+                  <div
+                    v-for="(step, si) in msg.steps"
+                    :key="si"
+                    class="think-step"
+                    :class="step.done ? 'done' : 'active'"
+                  >
+                    <span class="step-icon">{{ step.icon }}</span>
+                    <span class="step-text">{{ step.text }}</span>
+                  </div>
+                </div>
+              </div>
               <div class="msg-meta" v-if="msg.role === 'assistant' && msg.time">
                 {{ msg.tokens || '?' }} tokens · {{ msg.time }}s
                 <span v-if="msg.searchUsed" class="searched-tag">searched</span>
@@ -231,6 +249,7 @@ const testing = ref(false)
 const testMsg = ref('')
 const testOk = ref(false)
 const connReady = ref(true)
+const thinkingSteps = ref([])
 
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
@@ -375,32 +394,64 @@ async function sendMessage() {
   currentChat.value.push({ role: 'user', text })
   inputText.value = ''
   resize()
-  currentChat.value.push({ role: 'loading', text: '' })
   loading.value = true
-  scroll()
 
   const out = { role: 'assistant', text: '', time: '', tokens: 0, searchUsed: false }
-  currentChat.value.pop()
   currentChat.value.push(out)
   const t0 = Date.now()
 
+  // Thinking message (step-by-step display)
+  const thinkMsg = {
+    type: 'thinking',
+    steps: [
+      { icon: '🤔', text: '分析問題中...', done: false },
+      { icon: '🔍', text: '搜尋網頁中...', done: false },
+      { icon: '📄', text: '獲取網頁內容中...', done: false },
+      { icon: '✨', text: '整理回答中...', done: false },
+    ],
+    elapsed: '0.0',
+  }
+  currentChat.value.push(thinkMsg)
+  scroll()
+
+  // Elapsed timer
+  let elapsedInt = null
+  const startElapsed = () => {
+    elapsedInt = setInterval(() => {
+      thinkMsg.elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      scroll()
+    }, 300)
+  }
+  const stopElapsed = () => { if (elapsedInt) clearInterval(elapsedInt) }
+
+  const markDone = (idx) => { thinkMsg.steps[idx].done = true; scroll() }
+
   try {
     if (isSearch(text)) {
-      // Phase 1: Searching
       isResearching.value = true
       researchPhase.value = 'searching'
-      currentChat.value.push({ role: 'loading', text: '' })
-      const research = await doResearch(text)
+      startElapsed()
 
-      // Phase 2: Analyzing
+      // Step 1: Searching
+      thinkMsg.steps[0].done = true
+      const research = await doResearch(text)
+      markDone(1)
+
+      // Step 2: Fetching pages (backend already did this, but we show as step)
+      thinkMsg.steps[2].text = '已獲取 ' + (research?.results?.length || 0) + ' 個頁面內容'
+      markDone(2)
+
+      // Step 3: Analyzing
       researchPhase.value = 'analyzing'
       if (research && research.results && research.results.length) {
         out.searchUsed = true
-        // Show enriched research block with keywords + relevance scores
+        thinkMsg.steps[3].text = '根據 ' + research.source_count + ' 個來源總結回答'
+        markDone(3)
+
+        // Replace loading research block with real one
         currentChat.value.push({ type: 'research_results', query: text, research })
-        scroll()
-        // Use structured context from backend (already Harness-formatted)
-        // The backend returns context_chars so we know how much was extracted
+        stopElapsed()
+
         const sys = {
           role: 'system',
           content: `${research.system_prompt || systemPrompt.value}
@@ -415,23 +466,40 @@ ${research.context}`
           .slice(-6)
         history.forEach(m => msgs.push({ role: m.role, content: m.text }))
         researchPhase.value = 'streaming'
+
+        // Remove thinking message before streaming starts
+        const thinkIdx = currentChat.value.indexOf(thinkMsg)
+        if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
+
         await streamChat(msgs, out)
       } else {
-        researchPhase.value = 'analyzing'
+        thinkMsg.steps[3].text = '搜尋無結果，直接回答'
+        markDone(3)
+        stopElapsed()
+        const thinkIdx = currentChat.value.indexOf(thinkMsg)
+        if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
         await streamChat(buildMsgs(text), out)
       }
       isResearching.value = false
       researchPhase.value = ''
     } else {
+      // Non-search: just show brief thinking
+      thinkMsg.steps = [ { icon: '🤔', text: '思考中...', done: true } ]
+      startElapsed()
+      stopElapsed()
+      const thinkIdx = currentChat.value.indexOf(thinkMsg)
+      if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
       await streamChat(buildMsgs(text), out)
     }
     out.time = ((Date.now() - t0) / 1000).toFixed(1)
     out.tokens = out.text.split(/\s+/).length
   } catch (e) {
-    currentChat.value.pop()
+    const thinkIdx = currentChat.value.indexOf(thinkMsg)
+    if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
     currentChat.value.push({ role: 'error', text: e.message })
   }
 
+  stopElapsed()
   loading.value = false
   scroll()
   save()
@@ -1124,5 +1192,61 @@ body {
   .msg-row { max-width: 94%; }
   .search-block { max-width: 94%; }
   .messages { padding: 16px 14px; }
+}
+
+/* ── Thinking bubble ──────────────────────────────────── */
+.thinking-bubble {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  padding: 12px 16px !important;
+  min-width: 220px;
+}
+.thinking-hdr {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.thinking-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  margin-left: 4px;
+}
+.thinking-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.think-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  transition: color .2s;
+}
+.think-step.active {
+  color: var(--accent);
+}
+.think-step.done {
+  color: var(--ok, #34c759);
+}
+.think-step.done .step-text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.step-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+.step-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
