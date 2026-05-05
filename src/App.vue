@@ -464,11 +464,13 @@ ${research.context}`
         history.forEach(m => msgs.push({ role: m.role, content: m.text }))
         researchPhase.value = 'streaming'
 
-        // Remove thinking message before streaming
+        // Keep thinking bubble visible during streaming — remove AFTER stream finishes
+        await streamChat(msgs, out)
+
+        // Remove thinking message after streaming done
         const thinkIdx = currentChat.value.indexOf(thinkMsg)
         if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
-
-        await streamChat(msgs, out)
+        scroll()
       } else {
         thinkMsg.steps[3].text = '搜尋無結果，直接回答'
         markDone(3)
