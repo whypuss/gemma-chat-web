@@ -1,87 +1,103 @@
-# gemma-chat-vue
+# gemma-chat-web
 
-iOS Light Design System — Vue 3 SPA chatting with local AI (llama.cpp on Android Termux) or any OpenAI-compatible API.
+Vue 3 SPA 接入本地 AI（Gemma 2B on Android Termux）或任何 OpenAI 相容 API，內建 Hermes-style 研究管線。
 
-**Live:** https://gemma-chat-n9bpwb3nb-agooxo-puss-projects.vercel.app
+**Live:** https://whypuss.github.io/gemma-chat-web/
 
 ---
 
-## Architecture Overview
+## 架構
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Vue 3 SPA (Vercel)                       │
-│   ┌────────────────┐    ┌────────────────────────────────┐ │
-│   │  iOS Design    │    │  Hermes-Style Research        │ │
-│   │  System        │    │  Pipeline                    │ │
-│   │  (CSS vars)    │    │  /v1/research               │ │
-│   └────────────────┘    └────────────────────────────────┘ │
-└────────────────────┬─────────────────────────────────────────┘
-                     │ CORS Proxy (phone) or Direct API URL
-                     ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Android Termux (Sony SO-51B)                              │
-│  ┌────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │llama.cpp   │  │ CORS Proxy     │  │ DuckDuckGo     │  │
-│  │gemma-2b    │  │ /v1/research   │  │ HTML Search    │  │
-│  │context=2048│  │ + Page Fetch   │  │ + Regex Extr.  │  │
-│  └────────────┘  └────────────────┘  └────────────────┘  │
-│  localhost:8080              :18080                        │
-└────────────────────┬─────────────────────────────────────────┘
-                     │ SSH Reverse Tunnel (serveo / Cloudflare)
-                     ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Public URL (e.g. serveo.net or trycloudflare.com)         │
-│  HTTPS → Vue SPA → llama.cpp inference + search             │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│              Vue 3 SPA (GitHub Pages)                   │
+│   isSearch() → research 管線 → streaming 回答            │
+│   Thinking bubble: 步進顯示（分析/搜尋/獲取/整理）        │
+└────────────────────┬────────────────────────────────────┘
+                     │ fetch() — CORS 取決於連接模式
+         ┌───────────┴────────────┐
+         ▼                        ▼
+┌──────────────────┐    ┌──────────────────────────┐
+│  Local Mode       │    │  Direct Mode             │
+│  手機 CORS Proxy  │    │  OpenAI 相容 API         │
+│  (serveo tunnel)  │    │  (OpenRouter / 自架)     │
+└──────────────────┘    └──────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Android Termux (Sony SO-51B)                          │
+│  llama.cpp :8080     CORS Proxy :18080                  │
+│  gemma-2-2b-it-abliterated-Q4_K_M.gguf                  │
+│  SSH reverse tunnel (serveo.net) → moggy.moggy.ccwu.cc  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Two Connection Modes
+## 兩種連接模式
 
-### 1. Local Mode (default)
-- Connect to your **Android phone's CORS proxy** via public tunnel URL
-- Phone runs `llama.cpp` (local Gemma 2B model) + CORS proxy
-- Free inference, no API costs
-- Tunnel: `serveo.net` or `localhost.run` (SSH reverse tunnel)
+### Local Mode（預設）
+- CORS proxy URL 指向手機的 serveo tunnel（`https://moggy.moggy.ccwu.cc`）
+- 手機跑 `llama.cpp` + CORS proxy，完全免費推論
+- Tunnel 断了就 "Failed to fetch"
 
-### 2. Direct Mode
-- Connect to **any OpenAI-compatible API endpoint**
-- Built-in `/v1/research` endpoint uses DuckDuckGo HTML search + page content extraction
-- No API keys required for basic use
-- Set: API URL + Model name
+### Direct Mode
+- 任何 OpenAI 相容 API endpoint
+- 需自行確保 CORS 允許瀏覽器訪問
 
 ---
 
-## Project Structure
+## 研究管線（isSearch 觸發）
+
+```
+用戶問題
+    │
+    ▼ isSearch() 符合？
+    ├─ NO  → 直接 streaming 回答（無 research）
+    └─ YES → 研究管線：
+                │
+                ├─ 1. Thinking bubble 顯示
+                │     [🤔 分析問題] → [🔍 搜尋] → [📄 獲取頁面] → [✨ 整理]
+                │
+                ├─ 2. POST /v1/research
+                │     → 手機 CORS proxy (:18080) 处理：
+                │           ├─ DuckDuckGo HTML 搜尋
+                │           ├─ 並行抓取 top 3 頁面（semaphore 限制）
+                │           ├─ Regex 抽出正文（無 bs4）
+                │           └─ 句感斷詞（每頁 ~600 chars）
+                │
+                └─ 3. 合併進 system prompt，streaming 回答
+                      research 內容 **不在 UI 顯示**，只進 system prompt
+```
+
+**isSearch() 觸發詞（部分）：**
+`what|who|when|where|why|how|介紹|比較|推薦|解釋|分析|原因|歷史|多少|幾多|幾個|有多少|天氣|價格`
+
+---
+
+## 專案結構
 
 ```
 gemma-chat-web/
-├── README.md               # This file
-├── index.html              # SPA entry
-├── package.json            # Vue 3 + Vite
-├── vite.config.js          # Vite config (no backend proxy)
-├── vercel.json             # Vercel static deployment
-├── public/                 # Static assets
+├── index.html
+├── package.json
+├── vite.config.js
+├── .github/workflows/deploy.yml    ← GitHub Pages auto-deploy
 └── src/
-    ├── main.js             # Vue app entry
-    ├── App.vue             # Everything: UI + logic + styles
-    └── style.css           # Global resets (minimal)
+    └── App.vue                     ← 全部：UI + 邏輯 + 樣式
 
-phone/                      # Android Termux deployment files
-├── cors_proxy.py          # CORS proxy + Hermes /v1/research pipeline
-├── watchdog.sh            # Auto-restart: llama.cpp, CORS proxy, serveo tunnel
-├── start_all.sh           # Launch all services
-├── start_cf_tunnel.sh     # Cloudflare tunnel launcher
-└── start_cf_v2.sh         # Cloudflare tunnel v2
+phone/                              ← Android Termux 後端
+├── cors_proxy.py                   ← CORS proxy + /v1/research
+├── watchdog.sh                     ← llama.cpp + proxy + tunnel 看門狗
+├── start_all.sh                    ← 一鍵啟動全部服務
+└── start_cf_v2.sh                 ← Cloudflare Tunnel v2
 ```
 
 ---
 
-## Design System
+## 樣式系統
 
-iOS Light Design System (pure CSS, no framework):
+iOS Light Design（純 CSS，無 framework）：
 
 ```css
 --bg: #FFFFFF
@@ -91,124 +107,47 @@ iOS Light Design System (pure CSS, no framework):
 --text2: #86868B
 --border: #E5E5EA
 --radius: 12px
---shadow: 0 4px 12px rgba(0,0,0,0.08)
 ```
 
-**Font stack:** `-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif`
+Font: `-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui`
 
 ---
 
-## Hermes-Style Research Pipeline
+## CORS Proxy Endpoints（:18080）
 
 ```
-User question
-    │
-    ▼  isSearch() triggers?
-    ├─ NO  → streamChat() direct to model
-    └─ YES → doResearch() pipeline:
-                │
-                ├─ 1. POST /v1/research
-                │     └─ CORS proxy (phone :18080):
-                │           ├─ DuckDuckGo HTML search
-                │           │     └─ User-Agent rotation (5 browser profiles)
-                │           ├─ Fetch top 3 pages (parallel, semaphore-limited)
-                │           │     └─ Regex text extraction (no bs4)
-                │           └─ Sentence-aware truncation (600 chars/page)
-                │
-                ├─ 2. Display research block
-                │     └─ Title + URL + snippet + expandable content
-                │
-                └─ 3. streamChat() with enriched context
-                      └─ System prompt includes full page text
-```
-
-**Key technical choices:**
-- **No bs4:** Pure regex extraction handles 95% of pages well, no C-extension dependency risk
-- **User-Agent pool:** 5 rotating profiles to reduce DDG CAPTCHA risk
-- **Semaphore concurrency:** Max 3 parallel page fetches to avoid IP blocking
-- **Sentence-aware truncation:** Cuts at sentence boundaries, not mid-word
-- **HTML entities:** Properly decoded via `html.unescape()` (handles `&amp;`, `&quot;`, `&#39;`, `&nbsp;` etc.)
-
-**Response flow:**
-1. Show loading dots
-2. Display research block (3 sources, expandable)
-3. Stream model response (Markdown rendered)
-
----
-
-## Security
-
-### API Key Protection (Optional)
-
-`cors_proxy.py` supports optional `X-API-Key` header authentication:
-
-```python
-API_KEY = "gemma-local-2025"  # Change this! Set to None to disable
-```
-
-Clients must send `X-API-Key: gemma-local-2025` on every request. Without it, the proxy returns HTTP 401.
-
-### Public Tunnel Warning
-
-`serveo.net` / `localhost.run` expose your phone's CORS proxy to the public internet. Without API key protection, anyone who guesses your tunnel URL can use your llama.cpp inference.
-
-**Always enable API key authentication** if your tunnel URL is discoverable.
-
----
-
-## Backend Files (Android Termux)
-
-| File | Purpose |
-|------|---------|
-| `cors_proxy.py` | CORS reverse proxy + `/v1/research` pipeline |
-| `watchdog.sh` | Auto-restart: llama.cpp (context=2048), CORS proxy, serveo tunnel |
-| `start_all.sh` | Launch all services |
-| `start_cf_tunnel.sh` | Cloudflare tunnel launcher |
-
-### CORS Proxy Endpoints
-
-```
-POST /v1/chat/completions  →  proxy to llama.cpp
-POST /v1/models            →  proxy to llama.cpp
-POST /v1/search             →  DuckDuckGo HTML search (returns snippets)
-POST /v1/research           →  Hermes pipeline: search + fetch + extract + return context
-GET  /test.html             →  Browser test UI (includes API key input)
-```
-
-### Required Headers
-
-```
-X-API-Key: gemma-local-2025   # Only if API_KEY is set in cors_proxy.py
+POST /v1/chat/completions   →  轉發至 llama.cpp :8080
+POST /v1/models             →  轉發至 llama.cpp :8080
+POST /v1/research           →  Hermes 研究管線（搜 → 抓 → 斷）
+GET  /                      →  瀏覽器測試頁（含 API key 設定）
 ```
 
 ---
 
-## Deployment
+## 部署
 
-### Frontend (Vercel)
+### 前端（GitHub Pages）
 ```bash
 npm install
-npm run build
-# Deploy dist/ to Vercel (REST API, no CLI needed)
+npm run build    # → dist/
+git add -A && git commit && git push
+# GitHub Actions 自動部署到 https://whypuss.github.io/gemma-chat-web/
 ```
 
-Or push to GitHub — Vercel auto-deploys.
-
-### Backend (Android Termux)
+### 後端（Android Termux）
 ```bash
-# Install httpx (only dependency)
+# 依賴（只有 httpx）
 pip install httpx
 
-# Run CORS proxy (port 18080)
-python3 cors_proxy.py
-
-# Run llama.cpp (context=2048)
-# If your phone has 12GB+ RAM, add --flash-attn for better long-text performance
+# llama.cpp（context=2048，CPU 推理）
 llama-server \
-  -m /data/data/com.termux/files/home/models/gemma-2-2b-it-abliterated-Q4_K_M.gguf \
+  -m /path/to/gemma-2-2b-it-abliterated-Q4_K_M.gguf \
   --host 127.0.0.1 --port 8080 -ngl 0 -c 2048
 
-# Tunnel (serveo — fixed subdomain)
+# CORS proxy（port 18080）
+python3 cors_proxy.py
+
+# SSH reverse tunnel（固定 subdomain）
 ssh -i ~/.ssh/id_ed25519 \
   -o StrictHostKeyChecking=no \
   -R moggy:80:localhost:18080 \
@@ -217,37 +156,33 @@ ssh -i ~/.ssh/id_ed25519 \
 
 ---
 
-## Configuration
+## 設定（localStorage key: `gc-v5`）
 
-Settings persist in `localStorage` (key: `gc-v4`):
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `connMode` | `local` | `local` or `direct` |
-| `localTunnelUrl` | trycloudflare URL | Phone tunnel endpoint |
-| `directApiUrl` | empty | Direct API base URL |
-| `apiModel` | model filename | Model name |
-| `maxTokens` | 512 | Max completion tokens |
-| `systemPrompt` | Chinese helpful assistant | System prompt |
+| Key | 預設值 | 說明 |
+|-----|--------|------|
+| `connMode` | `local` | `local` 或 `direct` |
+| `localTunnelUrl` | `https://moggy.moggy.ccwu.cc` | 手機 tunnel URL |
+| `directApiUrl` | （空） | Direct API URL |
+| `apiModel` | `gemma-2-2b-it-abliterated-Q4_K_M.gguf` | 模型名稱 |
+| `maxTokens` | `1024` | 最大回應 tokens |
+| `systemPrompt` | 中文研究助手 prompt | system prompt |
 
 ---
 
 ## Tech Stack
 
-- **Frontend:** Vue 3 (Composition API) + Vite
-- **Styling:** Pure CSS, iOS Design System, no framework
-- **Icons:** Inline Lucide SVGs
-- **Backend:** Python 3 (Termux default) + httpx on Android Termux
-- **AI:** llama.cpp (local Gemma 2B) or any OpenAI-compatible API
-- **Tunnel:** SSH reverse tunnel (serveo.net / localhost.run / Cloudflare)
-- **Deploy:** Vercel (static SPA) or Cloudflare Pages
+- **前端：** Vue 3 (Composition API) + Vite + GitHub Pages
+- **樣式：** Pure CSS，iOS Design System
+- **後端：** Python 3 + httpx on Android Termux
+- **AI：** llama.cpp (Gemma 2B Q4_K_M) 或任何 OpenAI 相容 API
+- **Tunnel：** SSH reverse tunnel（serveo.net）綁定 `moggy.moggy.ccwu.cc`
+- **部署：** GitHub Pages（靜態） + GitHub Actions auto-deploy
 
 ---
 
-## Known Constraints
+## 已知限制
 
-- **llama.cpp context:** 2048 tokens max (hardware limited on phone)
-- **Page content:** Truncated to ~600 chars/page (sentence-aware cut, ~150 tokens × 3 pages)
-- **Search:** DuckDuckGo HTML only (no JavaScript rendering) — if blocked, consider adding a proxy
-- **Tunnel URL:** Changes on reconnect (serveo free plan = no fixed subdomain without paid account)
-- **API key in URL:** The tunnel subdomain (e.g. `moggy.serveo.net`) should be kept private
+- **llama.cpp context：** 2048 tokens（手機硬體限制）
+- **Research 內容：** 每頁 ~600 chars（句感斷詞），3 個來源
+- **Tunnel URL：** serveo 連線斷了需重連，URL 可能改變
+- **CORS：** 瀏覽器 fetch 需走 proxy（local mode），Direct mode 需 API 支援 CORS
