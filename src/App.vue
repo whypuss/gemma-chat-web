@@ -216,7 +216,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 
-const SK = 'gc-v4'
+const SK = 'gc-v5'
 
 // ── State ────────────────────────────────────────────────
 const inputText = ref('')
@@ -234,7 +234,7 @@ const connReady = ref(true)
 
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
-const localTunnelUrl = ref('https://adoption-transformation-computation-parenting.trycloudflare.com')
+const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
 const maxTokens = ref(1024)
