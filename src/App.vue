@@ -61,18 +61,23 @@
 
         <div v-for="(msg, i) in currentChat" :key="i">
 
-          <!-- Research block (Hermes-style: full page content) -->
+          <!-- Research block (Hermes-style: keywords + relevance + full page content) -->
           <div v-if="msg.type === 'research_results'" class="research-block">
             <div class="research-hdr">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               Research
               <span class="research-q">"{{ msg.query }}"</span>
               <span class="src-count">{{ msg.research.source_count }} sources</span>
+              <span v-if="msg.research.context_chars" class="ctx-chars">{{ Math.round(msg.research.context_chars / 100) / 10 }}k chars</span>
+              <span v-if="msg.research.keywords && msg.research.keywords.length" class="kw-list">
+                <span v-for="kw in msg.research.keywords.slice(0,6)" :key="kw" class="kw-tag">{{ kw }}</span>
+              </span>
             </div>
             <div class="sr-list">
               <div v-for="(r, ri) in msg.research.results" :key="ri" class="sr-item">
                 <div class="sr-title">
                   <a :href="r.url" target="_blank" rel="noopener">{{ r.title }}</a>
+                  <span v-if="r.relevance !== undefined && r.relevance > 0" class="rel-badge" title="Relevance score">{{ r.relevance }}pts</span>
                 </div>
                 <p class="sr-snippet">{{ r.snippet }}</p>
                 <details v-if="r.content && !r.content.startsWith('[Failed')" class="sr-content">
@@ -94,7 +99,15 @@
                 {{ msg.text }}
               </div>
               <div class="bubble loading-bubble" v-else-if="msg.role === 'loading'">
-                <span class="ldot"></span><span class="ldot"></span><span class="ldot"></span>
+                <span v-if="isResearching" class="research-status">
+                  <span class="pulse-dot"></span>
+                  {{ researchPhase === 'searching' ? '🔍 搜索中...' :
+                     researchPhase === 'analyzing' ? '⏳ 整合資料中...' :
+                     researchPhase === 'streaming' ? '✨ 回答中...' : '處理中...' }}
+                </span>
+                <span v-else class="ldots">
+                  <span class="ldot"></span><span class="ldot"></span><span class="ldot"></span>
+                </span>
               </div>
               <div class="msg-meta" v-if="msg.role === 'assistant' && msg.time">
                 {{ msg.tokens || '?' }} tokens · {{ msg.time }}s
@@ -208,6 +221,8 @@ const SK = 'gc-v4'
 // ── State ────────────────────────────────────────────────
 const inputText = ref('')
 const loading = ref(false)
+const isResearching = ref(false)
+const researchPhase = ref('')   // 'searching' | 'fetching' | 'analyzing'
 const msgEl = ref(null)
 const chatHistory = ref([[]])
 const activeChatIndex = ref(0)
@@ -222,8 +237,8 @@ const connMode = ref('local')
 const localTunnelUrl = ref('https://invision-dental-reliance-branches.trycloudflare.com')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
-const maxTokens = ref(512)
-const systemPrompt = ref('你係一個思想開放、好奇心強的AI助手。回答風格：用繁體中文回答我所有問題。回答要有深度，不只是表面資訊，要分析背後原因、觀點和可能性。樂於提出反直覺的觀點，不怕挑戰主流看法。如果問題有爭議，要展示多個角度。\n\n網絡搜尋優先：如果問題涉及事實、數據、新聞、天氣、價格、最新資訊、特定人物或事件，你必須先上網搵資料，先分析後再輸出。不要靠記憶回答可能過時的資訊，互聯網有的優先用互聯網。搜尋到資料後，先分析資料可靠性和關鍵資訊，再整理成易讀的回答。如果搵唔到相關資料，明確告知，並基於邏輯推理回答，同時說明限制。')
+const maxTokens = ref(1024)
+const systemPrompt = ref('你是一個專業的研究員助手。請嚴格按照以下步驟回答：\n1. 【閱讀】仔細閱讀每個來源的內容，標記關鍵事實和數據\n2. 【對比】如果不同來源有矛盾，標注出來\n3. 【回答】用條列式（- 或 1. 2. 3.）回答用戶問題，禁止胡說八道\n4. 【引用】在回答末尾標明：資料來源：[序号]\n\n重要原則：\n- 如果某個來源沒有提及某信息，明確說「未提及」，而不是猜測\n- 不要摻雜個人意見或猜測，只能基於提供的來源\n- 回答簡潔有力，每點不超過兩句話\n- 如果信息不足，直接說「根據現有資料無法確定」')
 
 function save() {
   localStorage.setItem(SK, JSON.stringify({
@@ -363,34 +378,42 @@ async function sendMessage() {
 
   try {
     if (isSearch(text)) {
+      // Phase 1: Searching
+      isResearching.value = true
+      researchPhase.value = 'searching'
       currentChat.value.push({ role: 'loading', text: '' })
       const research = await doResearch(text)
-      currentChat.value.pop()
+
+      // Phase 2: Analyzing
+      researchPhase.value = 'analyzing'
       if (research && research.results && research.results.length) {
         out.searchUsed = true
-        // Show enriched research block with full page content
+        // Show enriched research block with keywords + relevance scores
         currentChat.value.push({ type: 'research_results', query: text, research })
         scroll()
-        // System prompt with FULL page content (not just snippets)
+        // Use structured context from backend (already Harness-formatted)
+        // The backend returns context_chars so we know how much was extracted
         const sys = {
           role: 'system',
-          content: `你是一個思想開放、好奇心強的AI助手。請根據以下研究資料，用繁體中文詳細回答用戶問題。
+          content: `${research.system_prompt || systemPrompt.value}
 
-研究資料（來自互聯網搜索）：
-${truncateContext(research.context, 1500)}
+研究資料（已由 Harness 整理，${research.source_count} 個來源，關鍵詞：${(research.keywords || []).slice(0,8).join(', ')}）：
 
-請用繁體中文回答。分析資料後再輸出，唔好只係重複，要有自己的見解。`
+${research.context}`
         }
         const msgs = [sys]
-        // Include recent conversation for context
         const history = currentChat.value
           .filter(m => ['user','assistant','error'].includes(m.role) && m.text)
-          .slice(-6)  // last 6 messages for context
+          .slice(-6)
         history.forEach(m => msgs.push({ role: m.role, content: m.text }))
+        researchPhase.value = 'streaming'
         await streamChat(msgs, out)
       } else {
+        researchPhase.value = 'analyzing'
         await streamChat(buildMsgs(text), out)
       }
+      isResearching.value = false
+      researchPhase.value = ''
     } else {
       await streamChat(buildMsgs(text), out)
     }
@@ -735,7 +758,7 @@ body {
 }
 
 /* Loading dots */
-.loading-bubble { display: flex; gap: 5px; padding: 12px 16px; }
+.loading-bubble { display: flex; align-items: center; gap: 5px; padding: 12px 16px; }
 .ldot {
   width: 6px; height: 6px;
   background: var(--text3);
@@ -745,6 +768,28 @@ body {
 .ldot:nth-child(2) { animation-delay: .2s; }
 .ldot:nth-child(3) { animation-delay: .4s; }
 @keyframes bounce { 0%,60%,100%{transform:translateY(0);opacity:.35} 30%{transform:translateY(-5px);opacity:1} }
+
+/* Research phase indicator */
+.research-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+  font-size: 13px;
+}
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse-ring 1.4s ease-out infinite;
+  flex-shrink: 0;
+}
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(0,122,255,0.4); }
+  70%  { box-shadow: 0 0 0 6px rgba(0,122,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,122,255,0); }
+}
 
 .msg-meta {
   font-size: 11px;
@@ -790,6 +835,33 @@ body {
   padding: 2px 7px;
   border-radius: 9px;
   font-weight: 600;
+}
+.ctx-chars {
+  color: var(--text2);
+  font-size: 11px;
+}
+.kw-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 4px;
+}
+.kw-tag {
+  background: rgba(0,122,255,0.08);
+  color: var(--accent);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-weight: 400;
+}
+.rel-badge {
+  background: rgba(52,199,89,0.1);
+  color: var(--ok);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  margin-left: 6px;
+  font-weight: 500;
 }
 .sr-list { }
 .sr-item {
