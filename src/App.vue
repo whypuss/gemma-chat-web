@@ -46,6 +46,7 @@
         <div class="topbar-right">
           <span class="status-dot" :class="statusClass"></span>
           <span class="status-label">{{ statusText }}</span>
+          <button class="icon-btn" @click="showSettings = true" title="Settings">⚙️</button>
         </div>
       </header>
 
