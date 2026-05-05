@@ -437,7 +437,7 @@ async function sendMessage() {
       const research = await doResearch(text)
       markDone(1)
 
-      // Step 2: Fetching pages (backend already did this, but we show as step)
+      // Step 2: Fetching pages
       thinkMsg.steps[2].text = '已獲取 ' + (research?.results?.length || 0) + ' 個頁面內容'
       markDone(2)
 
@@ -447,9 +447,6 @@ async function sendMessage() {
         out.searchUsed = true
         thinkMsg.steps[3].text = '根據 ' + research.source_count + ' 個來源總結回答'
         markDone(3)
-
-        // Replace loading research block with real one
-        currentChat.value.push({ type: 'research_results', query: text, research })
         stopElapsed()
 
         const sys = {
@@ -467,7 +464,7 @@ ${research.context}`
         history.forEach(m => msgs.push({ role: m.role, content: m.text }))
         researchPhase.value = 'streaming'
 
-        // Remove thinking message before streaming starts
+        // Remove thinking message before streaming
         const thinkIdx = currentChat.value.indexOf(thinkMsg)
         if (thinkIdx !== -1) currentChat.value.splice(thinkIdx, 1)
 
