@@ -234,7 +234,7 @@ const connReady = ref(true)
 
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
-const localTunnelUrl = ref('https://ai.moggy.ccwu.cc')
+const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
 const maxTokens = ref(1024)
