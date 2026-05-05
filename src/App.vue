@@ -214,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 
 const SK = 'gc-v4'
 
@@ -262,6 +262,9 @@ function load() {
   } catch {}
 }
 onMounted(load)
+
+// Auto-save settings whenever they change (no need to send a message first)
+watch([connMode, localTunnelUrl, directApiUrl, apiModel, maxTokens], () => save())
 
 // ── Computed ─────────────────────────────────────────────
 const currentChat = computed(() => chatHistory.value[activeChatIndex.value])

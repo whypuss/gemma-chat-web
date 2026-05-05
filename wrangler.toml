@@ -1,0 +1,6 @@
+name = "gemma-chat-web"
+compatibility_date = "2024-01-01"
+account_id = "060f73f6854fc6dc3232d4d85704bd3f"
+
+[pages]
+project_name = "gemma-chat-web"
