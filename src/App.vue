@@ -317,7 +317,7 @@ function isSearch(q) {
   q = q.trim()
   if (q.length > 120) return false
   // Broad triggers — err on side of searching
-  return /^(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|202|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史|最新|最近|今日|今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|幾多|多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論)/i.test(q) || q.includes('?') || /[一二三四五六七八九十百千萬億零〇]/.test(q)
+  return /(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|202|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史|最新|最近|今日|今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|幾多|多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論|有多少|幾多|幾個)/i.test(q) || q.includes('?') || /[一二三四五六七八九十百千萬億零〇]/.test(q)
 }
 
 // ── API ──────────────────────────────────────────────────
