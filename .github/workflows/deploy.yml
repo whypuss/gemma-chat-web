@@ -35,5 +35,22 @@ jobs:
           accountId: 060f73f6854fc6dc3232d4d85704bd3f
           projectName: gemma-chat-web
           directory: ./
-          exclude: [node_modules, src, "*.md", "*.toml", "*.json", "!.env*", ".github", ".git", "phone", "cors_proxy.py", "!.wrangler.toml", "!.cloudflareignore"]
+          exclude:
+            - node_modules
+            - src
+            - "*.md"
+            - "*.toml"
+            - "*.json"
+            - ".env*"
+            - ".github"
+            - ".git"
+            - phone
+            - cors_proxy.py
+            - wrangler.toml
+            - index.html
+            - package.json
+            - package-lock.json
+            - vite.config.js
+            - README.md
+            - cors_proxy.py
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
