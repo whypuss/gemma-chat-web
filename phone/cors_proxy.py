@@ -33,7 +33,7 @@ import io
 PORT             = 18080
 BACKEND          = "http://localhost:8080"
 PATH_PREFIX      = "/1edf5d12423b60e8"
-API_KEY          = "gemma-local-2025"   # Set to None to disable auth
+API_KEY = None  # No auth on phone localhost — tunnel itself is password-protected
 
 # Token budgets (Gemma 2B Q4_K_M ~6 tok/word EN, ~2 tok/char ZH)
 MAX_CONTEXT_TOKENS  = 1800   # per-source token budget (safe for ZH mixed text)
