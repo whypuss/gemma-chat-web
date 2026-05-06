@@ -1,4 +1,4 @@
-const TARGET = "https://moggy.moggy.ccwu.cc";
+const TARGET = "https://93fc4f69-b9e2-4855-9358-1a9e8729551d.trycloudflare.com";
 
 export async function onRequest({ request, env }) {
   const url = new URL(request.url);
