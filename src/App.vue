@@ -308,7 +308,7 @@ function trimCurrentChat() {
 
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
-const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
+const localTunnelUrl = ref('/api')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
 const maxTokens = ref(1024)
@@ -338,8 +338,8 @@ function load() {
     if (s.systemPrompt) systemPrompt.value = s.systemPrompt
   } catch {}
   // Migrate stale tunnel URLs
-  if (['https://ai.moggy.ccwu.cc', 'https://moggy.serveousercontent.com'].includes(localTunnelUrl.value)) {
-    localTunnelUrl.value = 'http://moggy.moggy.ccwu.cc'
+  if (['https://ai.moggy.ccwu.cc', 'https://moggy.serveousercontent.com', 'https://moggy.moggy.ccwu.cc', 'http://moggy.moggy.ccwu.cc'].includes(localTunnelUrl.value)) {
+    localTunnelUrl.value = '/api'
     save()
   }
 }

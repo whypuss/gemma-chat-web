@@ -34,5 +34,6 @@ jobs:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: 060f73f6854fc6dc3232d4d85704bd3f
           projectName: gemma-chat-web
-          directory: ./dist
+          directory: ./
+          exclude: [node_modules, src, "*.md", "*.toml", "*.json", "!.env*", ".github", ".git", "phone", "cors_proxy.py", "!.wrangler.toml", "!.cloudflareignore"]
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
