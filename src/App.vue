@@ -558,6 +558,7 @@ async function sendMessage() {
 
     const startTime = Date.now()
 
+    console.log("[DEBUG] context:", context?.slice(0,100), "msgs:", JSON.stringify(buildMsgs(context)))
     const msgs = buildMsgs(context)
     researchPhase.value = 'streaming'
 
