@@ -31,4 +31,4 @@ jobs:
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: npx wrangler pages deploy ./ --project-name=gemma-chat-web --branch=production
+        run: npx wrangler pages deploy ./dist --project-name=gemma-chat-web --branch=production
