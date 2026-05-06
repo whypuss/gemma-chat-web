@@ -28,11 +28,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Copy Functions into dist for deployment
+        run: cp -r functions/. dist/
+
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: 060f73f6854fc6dc3232d4d85704bd3f
-          projectName: gemma-chat-web
-          directory: ./
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        run: npx wrangler pages deploy ./dist --project-name=gemma-chat-web --commit-relocated
