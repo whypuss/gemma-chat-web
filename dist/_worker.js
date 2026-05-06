@@ -2,12 +2,8 @@ const TARGET = "https://moggy.moggy.ccwu.cc";
 
 export async function onRequest({ request, env }) {
   const url = new URL(request.url);
-  const path = url.pathname;
+  const targetPath = url.pathname.replace(/^\/api/, "");
 
-  // Proxy API requests to phone tunnel (strip /api prefix)
-  const targetPath = path.replace(/^\/api/, '');
-  const targetUrl = `${TARGET}${targetPath}${url.search}`;
-  
   const headers = {};
   request.headers.forEach((value, key) => {
     const lk = key.toLowerCase();
@@ -18,11 +14,10 @@ export async function onRequest({ request, env }) {
 
   let response;
   try {
-    response = await fetch(targetUrl, {
+    response = await fetch(`${TARGET}${targetPath}${url.search}`, {
       method: request.method,
       headers,
-      body: request.body,
-      duplex: "half"
+      body: request.body
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: { message: "Proxy fetch failed: " + e.message } }), {
