@@ -558,8 +558,8 @@ async function sendMessage() {
 
     const startTime = Date.now()
 
-    console.log("[DEBUG] context:", context?.slice(0,100), "msgs:", JSON.stringify(buildMsgs(context)))
     const msgs = buildMsgs(context)
+    console.log("[DEBUG] context:", context?.slice(0,100), "msgs:", JSON.stringify(msgs))
     researchPhase.value = 'streaming'
 
     await streamChat(msgs, reply, currentCtrl.signal, reqId)
