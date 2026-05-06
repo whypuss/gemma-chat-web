@@ -525,13 +525,13 @@ async function sendMessage() {
 
   try {
     // Determine whether to do web research based on searchMode
-    const doResearch = (() => {
+    const shouldResearch = (() => {
       if (searchMode.value === 'always') return true
       if (searchMode.value === 'never') return false
       return isSearch(text)   // 'auto': use keyword detection
     })()
 
-    if (doResearch) {
+    if (shouldResearch) {
       isResearching.value = true
       researchPhase.value = 'searching'
       startElapsed()
