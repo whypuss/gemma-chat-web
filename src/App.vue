@@ -547,7 +547,7 @@ async function sendMessage() {
       clearInterval(timerId)
 
       if (resData && resData.results) {
-        context = (resData.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim()
+        context = ((resData.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 3000))
         thinkingMsg.steps[1].done = true
         thinkingMsg.steps.push({ text: `已獲取 ${resData.source_count} 個頁面內容`, icon: '📄', done: true })
       } else {
