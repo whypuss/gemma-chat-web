@@ -433,16 +433,19 @@ async function doResearch(q) {
 }
 
 async function streamChat(msgs, out, abortSignal) {
-  // Use shared abort controller if provided (from sendMessage), otherwise fresh one
-  const ctrl = abortSignal ? null : new AbortController()
-  const id = setTimeout(() => { if (ctrl) ctrl.abort() }, 60000)   // 60s max streaming
-  const signal = abortSignal || (ctrl ? ctrl.signal : null)
+  // Always use a local abort controller with 60s timeout to avoid hanging
+  const ctrl = new AbortController()
+  const id = setTimeout(() => ctrl.abort(), 60000)
+  // If caller provides abortSignal, listen to it too
+  if (abortSignal) {
+    abortSignal.addEventListener('abort', () => ctrl.abort())
+  }
   try {
     const r = await fetch(baseUrl.value + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: apiModel.value, messages: msgs, max_tokens: maxTokens.value, stream: true }),
-      signal
+      signal: ctrl.signal
     })
     if (!r.ok) {
       const text = await r.text()
