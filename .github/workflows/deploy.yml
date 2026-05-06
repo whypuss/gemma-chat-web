@@ -28,9 +28,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Copy Functions into dist/functions for deployment
-        run: cp -r functions/. dist/functions/
-
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
