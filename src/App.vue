@@ -479,6 +479,21 @@ async function streamChat(msgs, out, abortSignal) {
 }
 
 // ── Send ─────────────────────────────────────────────────
+// fetchResearch: wrapper that bridges sendMessage's AbortSignal to doResearch's internal controller
+async function fetchResearch(q, signal) {
+  // Run doResearch but abort early if signal is cancelled
+  const timeout = AbortSignal.timeout(30000)
+  const combined = AbortSignal.any([signal, timeout])
+  const r = await fetch(baseUrl.value + '/v1/research', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q }),
+    signal: combined,
+  })
+  if (!r.ok) return null
+  return r.json()
+}
+
 async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || loading.value) return
