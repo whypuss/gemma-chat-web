@@ -444,7 +444,11 @@ async function streamChat(msgs, out, abortSignal) {
       body: JSON.stringify({ model: apiModel.value, messages: msgs, max_tokens: maxTokens.value, stream: true }),
       signal
     })
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    if (!r.ok) {
+      const text = await r.text()
+      console.error('[streamChat] HTTP error', r.status, text)
+      throw new Error(`HTTP ${r.status}`)
+    }
     const reader = r.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
@@ -589,7 +593,8 @@ async function sendMessage() {
 function buildMsgs(context) {
   const msgs = []
   if (systemPrompt.value) msgs.push({ role: 'system', content: systemPrompt.value })
-  currentChat.value.filter(m => ['user','assistant'].includes(m.role) && m.text)
+  currentChat.value
+    .filter(m => ['user','assistant'].includes(m.role) && m.text)
     .forEach(m => msgs.push({ role: m.role, content: m.text }))
   // Inject research context into last user message
   if (context) {
