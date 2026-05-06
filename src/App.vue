@@ -249,11 +249,11 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, watch, markRaw } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 
 const SK = 'gc-v5'
 
-// ── 響應式狀態 ──────────────────────────────────────────
+// ── State ────────────────────────────────────────────────
 const inputText = ref('')
 const loading = ref(false)
 const isResearching = ref(false)
@@ -266,12 +266,47 @@ const testing = ref(false)
 const testMsg = ref('')
 const testOk = ref(false)
 const connReady = ref(true)
+const thinkingSteps = ref([])
 
-// ── 請求控制器 (防止數據流混亂) ──────────────────────────
-let currentCtrl = null
-let currentReqId = 0
+// ── Request abort controller + request ID (prevents stale streams) ─
+let currentCtrl = null   // cleared after each request cycle
+let currentReqId = 0     // incremented on each sendMessage; stale responses are discarded
 
-// ── 持久化配置 ──────────────────────────────────────────
+// ── History memory management ────────────────────────────────────────
+// Freeze old messages + cap total history chars to prevent Vue reactive OOM
+const MAX_HISTORY_CHARS = 1500   // ~300-500 tokens for gemma-2b; safe for 1024 ctx
+
+function _freezeAndCap(chat) {
+  // Freeze oldest messages first (oldest = start of array)
+  // Work backwards, freezing until total chars ≤ MAX_HISTORY_CHARS
+  let total = 0
+  const preserved = []
+  for (let i = chat.length - 1; i >= 0; i--) {
+    const m = chat[i]
+    const cost = (m.text || '').length + 40   // 40 = role overhead
+    if (total + cost <= MAX_HISTORY_CHARS) {
+      total += cost
+      preserved.push(m)
+    } else {
+      // Freeze the rest to kill deep-reactivity overhead
+      if (!Object.isFrozen(m)) Object.freeze(m)
+    }
+  }
+  // Reverse: oldest trimmed messages are frozen; preserved ones stay reactive
+  return preserved.reverse()
+}
+
+function trimCurrentChat() {
+  const chat = currentChat.value
+  if (chat.length <= 4) return   // ≤2 exchanges: not worth trimming
+  const trimmed = _freezeAndCap(chat)
+  if (trimmed.length < chat.length) {
+    chat.length = 0
+    chat.push(...trimmed)
+  }
+}
+
+// ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
 const localTunnelUrl = ref('http://moggy.moggy.ccwu.cc')
 const directApiUrl = ref('')
@@ -310,7 +345,7 @@ function load() {
 }
 onMounted(load)
 
-// Auto-save settings whenever they change
+// Auto-save settings whenever they change (no need to send a message first)
 watch([connMode, localTunnelUrl, directApiUrl, apiModel, maxTokens, searchMode], () => save())
 
 // ── Computed ─────────────────────────────────────────────
@@ -344,198 +379,82 @@ function loadChat(i) { activeChatIndex.value = i }
 function isSearch(q) {
   q = q.trim()
   if (q.length > 120) return false
+  // Intent triggers: info-seeking question words + explicit question mark
+  // Note: intentionally excludes bare Chinese numerals (e.g. "列出三個優點")
+  // to avoid forcing research on non-search queries that happen to contain numbers
+  // Cantonese (廣東話) patterns: 點睇 好唔好 值唔值得 幾時 幾耐 係邊 係咪 聽講 知唔知 etc.
   return /(what|who|when|where|why|how|which|whose|latest|news|weather|current|recent|today|now|yesterday|tomorrow|介紹|比較|推薦|解釋|分析|原理|原因|結果|影響|歷史 最新|最近|今日今天|天氣|天氣預報|天氣怎樣|澳門天|香港天|天氣如何|天氣情況|價格|多少|幾多|幾個|有多少|邊個|邊間|點解|點樣|如何|怎樣|係咩|係邊|關於|討論|點睇|好唔好|值唔值得|幾時|幾耐|可唔可以|可不可以|有無|有冇|係咪|係唔係|聽講|聽說|知唔知|係真假)/i.test(q) || q.includes('?')
 }
 
-// ── 研究封裝 (AbortSignal.any — 隧道假死時 30s 自動斷開) ──────────────
-async function fetchResearch(q, signal) {
-  // Combine user abort + 30s timeout into one signal
-  const timeout = AbortSignal.timeout(30000)
-  const combined = AbortSignal.any([signal, timeout])
-  const r = await fetch(`${baseUrl.value}/v1/research`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q }),
-    signal: combined,
-  })
-  if (!r.ok) return null
-  return r.json()
-}
+// ── API ──────────────────────────────────────────────────
 
-// ── 核心數據流處理 ───────────────────────────────────────
-async function sendMessage() {
-  const text = inputText.value.trim()
-  if (!text || loading.value) return
-
-  // 防止新請求被舊響應覆蓋
-  if (currentCtrl) currentCtrl.abort()
-  currentCtrl = new AbortController()
-  const reqId = ++currentReqId
-
-  currentChat.value.push({ role: 'user', text })
-  inputText.value = ''
-  resize()
-  loading.value = true
-
-  // Thinking bubble
-  const thinkMsg = {
-    type: 'thinking',
-    steps: [
-      { icon: '🤔', text: '分析問題中...', done: false },
-      { icon: '🔍', text: '搜尋網頁中...', done: false },
-      { icon: '📄', text: '獲取網頁內容中...', done: false },
-      { icon: '✨', text: '整理回答中...', done: false },
-    ],
-    elapsed: '0.0',
-  }
-  currentChat.value.push(thinkMsg)
-  scroll()
-
-  const t0 = Date.now()
-  let elapsedInt = null
-  const startElapsed = () => {
-    elapsedInt = setInterval(() => {
-      thinkMsg.elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-      scroll()
-    }, 300)
-  }
-  const stopElapsed = () => { if (elapsedInt) clearInterval(elapsedInt) }
-  const markDone = (idx) => { thinkMsg.steps[idx].done = true; scroll() }
-
-  const out = { role: 'assistant', text: '', time: '', tokens: 0, searchUsed: false }
-  currentChat.value.push(out)
-
+// Hermes-style research: search + fetch page content + extract text
+// NOTE: wraps in AbortSignal.timeout(30000) — if tunnel is假死 (silent drop)
+// without closing the connection, we bail out after 30s instead of hanging forever
+async function doResearch(q) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30000)
   try {
-    const shouldResearch = searchMode.value === 'always' || (searchMode.value === 'auto' && isSearch(text))
-    let researchCtx = ''
-
-    if (shouldResearch) {
-      isResearching.value = true
-      researchPhase.value = 'searching'
-      startElapsed()
-      markDone(0)
-
-      const resData = await fetchResearch(text, currentCtrl.signal)
-      if (reqId !== currentReqId) { stopElapsed(); loading.value = false; return }
-
-      markDone(1)
-      thinkMsg.steps[2].text = '已獲取 ' + (resData?.results?.length || 0) + ' 個頁面內容'
-      markDone(2)
-
-      if (resData?.results?.length) {
-        out.searchUsed = true
-        thinkMsg.steps[3].text = '根據 ' + resData.source_count + ' 個來源總結回答'
-        markDone(3)
-        stopElapsed()
-
-        if (reqId !== currentReqId) { loading.value = false; return }
-
-        //  timeout/abort → research_aborted
-        if (resData?.research_aborted) {
-          const i = currentChat.value.indexOf(thinkMsg)
-          if (i !== -1) currentChat.value.splice(i, 1)
-          currentChat.value.push({ role: 'error', text: '搜索超時（30秒無響應），請檢查隧道連接。' })
-          isResearching.value = false; researchPhase.value = ''; loading.value = false; scroll()
-          return
-        }
-
-        // 研究結果用 markRaw 脫離 Vue 響應式追蹤，省內存
-        currentChat.value.push({ type: 'research_results', query: text, research: markRaw(resData) })
-
-        // 清理 context 並注入的最後用戶消息（對 Gemma 2b 效果好）
-        const rawCtx = (resData.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim()
-        researchCtx = rawCtx.slice(0, 1200)
-      } else {
-        thinkMsg.steps[3].text = '搜尋無結果，直接回答'
-        markDone(3)
-        stopElapsed()
+    if (connMode.value === 'direct') {
+      try {
+        const r = await fetch(baseUrl.value + '/v1/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (r.ok) return await r.json()
+      } catch (e) {
+        clearTimeout(timer)
+        if (e.name === 'AbortError') return { research_aborted: true }
+        return null
       }
-      isResearching.value = false
-      researchPhase.value = ''
     } else {
-      // 無需 research：移除 thinking 直接推理
-      const i = currentChat.value.indexOf(thinkMsg)
-      if (i !== -1) currentChat.value.splice(i, 1)
-      stopElapsed()
-    }
-
-    // 構建消息：研究上下文注入的最後用戶消息
-    const msgs = buildMessages(text, researchCtx)
-    researchPhase.value = 'streaming'
-
-    await streamChat(msgs, out, currentCtrl.signal, reqId)
-
-    // 移除 thinking
-    const ti = currentChat.value.indexOf(thinkMsg)
-    if (ti !== -1) currentChat.value.splice(ti, 1)
-
-    out.time = ((Date.now() - t0) / 1000).toFixed(1)
-    out.tokens = out.text.split(/\s+/).length
-    trimCurrentChat()
-  } catch (e) {
-    const ti = currentChat.value.indexOf(thinkMsg)
-    if (ti !== -1) currentChat.value.splice(ti, 1)
-    if (e.name !== 'AbortError') {
-      currentChat.value.push({ role: 'error', text: e.message })
-    }
-  }
-
-  stopElapsed()
-  if (reqId === currentReqId) {
-    currentCtrl = null
-    loading.value = false
-    scroll()
-    save()
-  }
-}
-
-// 構建發送給模型的消息列表
-// 研究上下文直接注入最後用戶消息（gemma-2b 最佳姿勢）
-function buildMessages(userText, context) {
-  const msgs = []
-  if (systemPrompt.value) msgs.push({ role: 'system', content: systemPrompt.value })
-
-  currentChat.value
-    .filter(m => ['user', 'assistant'].includes(m.role) && m.text && !m.type)
-    .forEach(m => msgs.push({ role: m.role, content: m.text }))
-
-  // 最後一條用户消息注入研究上下文
-  if (context) {
-    const lastIdx = msgs.length - 1
-    if (msgs[lastIdx]?.role === 'user') {
-      msgs[lastIdx] = {
-        role: 'user',
-        content: `資料庫參考內容：\n${context}\n\n用戶問題：${msgs[lastIdx].content}`
+      try {
+        const r = await fetch(baseUrl.value + '/v1/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (r.ok) return await r.json()
+      } catch (e) {
+        clearTimeout(timer)
+        if (e.name === 'AbortError') return { research_aborted: true }
+        return null
       }
     }
+  } finally {
+    clearTimeout(timer)
   }
-  return msgs
+  return null
 }
 
-// SSE 流式解析：每個 chunk 都檢查 reqId，舊請求 Early-exit
-async function streamChat(msgs, out, signal, reqId) {
-  const id = setTimeout(() => { try { signal.abort() } catch {} }, 60000)
+async function streamChat(msgs, out, abortSignal) {
+  // Use shared abort controller if provided (from sendMessage), otherwise fresh one
+  const ctrl = abortSignal ? null : new AbortController()
+  const id = setTimeout(() => { if (ctrl) ctrl.abort() }, 60000)   // 60s max streaming
+  const signal = abortSignal || (ctrl ? ctrl.signal : null)
   try {
-    const r = await fetch(`${baseUrl.value}/v1/chat/completions`, {
+    const r = await fetch(baseUrl.value + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: apiModel.value, messages: msgs, max_tokens: maxTokens.value, stream: true }),
-      signal,
+      signal
     })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const reader = r.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
-
     while (true) {
       const { done, value } = await reader.read()
-      // reqId 改變 → 新請求搶先了，靜默退出
-      if (done || reqId !== currentReqId) break
-
+      if (done) break
       buf += dec.decode(value, { stream: true })
       const lines = buf.split('\n')
+      // Keep incomplete last line in buffer for next chunk (fixes JSON truncation)
       buf = lines.pop() || ''
-
       for (const l of lines) {
         const t = l.trim()
         if (!t.startsWith('data: ')) continue
@@ -546,40 +465,117 @@ async function streamChat(msgs, out, signal, reqId) {
           const c = p.choices?.[0]?.delta?.content
           if (c) { out.text += c; scroll() }
         } catch {
-          // JSON 被網絡邊界截斷，下一 chunk 繼續
+          // Silent: JSON truncated by network boundary — will retry on next chunk
         }
       }
     }
   } catch (e) {
+    // Swallow abort — caller (sendMessage) may have intentionally cancelled us
     if (e.name === 'AbortError' || e.message?.includes('abort')) return
-    throw e
+    throw e   // re-throw real errors so sendMessage catch can display them
   } finally {
     clearTimeout(id)
   }
 }
 
-// ── 內存防禦：markRaw 脫離大对象響應式追蹤 ───────────────────────────────
-const MAX_HISTORY_CHARS = 2000
+// ── Send ─────────────────────────────────────────────────
+async function sendMessage() {
+  const text = inputText.value.trim()
+  if (!text || loading.value) return
 
-function trimCurrentChat() {
+  const reqId = ++currentReqId
+  if (currentCtrl) currentCtrl.abort()
+  currentCtrl = new AbortController()
+
+  inputText.value = ''
+  loading.value = true
+
   const chat = currentChat.value
-  if (chat.length <= 4) return
+  chat.push({ role: 'user', text })
+  scroll()
 
-  let totalChars = 0
-  const optimized = []
-  for (let i = chat.length - 1; i >= 0; i--) {
-    const m = chat[i]
-    const len = (m.text || '').length
-    if (totalChars + len < MAX_HISTORY_CHARS) {
-      totalChars += len
-      optimized.unshift(m)
-    } else {
-      // 大对象用 markRaw 節省 Vue reactive 开销
-      optimized.unshift(m.markRaw ? m : Object.freeze({ ...m }))
+  try {
+    let context = ""
+    let timerId = null
+
+    const shouldSearch = searchMode.value === 'always' || (searchMode.value === 'auto' && isSearch(text))
+
+    if (shouldSearch && searchMode.value !== 'never') {
+      isResearching.value = true
+
+      const thinkingMsg = {
+        type: 'thinking',
+        elapsed: '0.0',
+        steps: [
+          { text: '分析問題中...', icon: '🤔', done: true },
+          { text: '搜尋網頁中...', icon: '🔍', done: false }
+        ]
+      }
+      chat.push(thinkingMsg)
+      scroll()
+
+      const startMs = Date.now()
+      timerId = setInterval(() => {
+        thinkingMsg.elapsed = ((Date.now() - startMs) / 1000).toFixed(1)
+      }, 100)
+
+      const resData = await fetchResearch(text, currentCtrl.signal)
+      if (reqId !== currentReqId) {
+        clearInterval(timerId)
+        return
+      }
+
+      clearInterval(timerId)
+
+      if (resData && resData.results) {
+        context = (resData.context || '').replace(/\[ ?\d+ ?\]/g, '').replace(/\s+/g, ' ').trim()
+        thinkingMsg.steps[1].done = true
+        thinkingMsg.steps.push({ text: `已獲取 ${resData.source_count} 個頁面內容`, icon: '📄', done: true })
+      } else {
+        thinkingMsg.steps[1].done = true
+        thinkingMsg.steps.push({ text: `無法獲取資料`, icon: '⚠️', done: true })
+      }
+    }
+
+    const reply = { role: 'assistant', text: '', searchUsed: !!context, time: 0 }
+    chat.push(reply)
+    scroll()
+
+    const startTime = Date.now()
+
+    const msgs = buildMessages(context)
+    researchPhase.value = 'streaming'
+
+    await streamChat(msgs, reply, currentCtrl.signal, reqId)
+
+    const ti = chat.indexOf(chat.find(m => m.type === 'thinking'))
+    if (ti !== -1) chat.splice(ti, 1)
+
+    reply.time = ((Date.now() - startTime) / 1000).toFixed(1)
+    reply.tokens = reply.text.split(/\s+/).length
+    trimCurrentChat()
+
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      chat.push({ role: 'error', text: `Connection Error: ${e.message}` })
     }
   }
-  chat.length = 0
-  chat.push(...optimized)
+
+  if (reqId === currentReqId) {
+    currentCtrl = null
+    loading.value = false
+    isResearching.value = false
+    scroll()
+    save()
+  }
+}
+
+function buildMsgs(userText) {
+  const msgs = []
+  if (systemPrompt.value) msgs.push({ role: 'system', content: systemPrompt.value })
+  currentChat.value.filter(m => ['user','assistant'].includes(m.role) && m.text)
+    .forEach(m => msgs.push({ role: m.role, content: m.text }))
+  return msgs
 }
 
 // ── Test ────────────────────────────────────────────────
@@ -587,7 +583,8 @@ async function testConn() {
   testing.value = true
   testMsg.value = ''
   try {
-    const r = await fetch(`${baseUrl.value}/v1/models`, {
+    const r = await fetch(baseUrl.value + '/v1/models', {
+      headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(10000)
     })
     if (r.ok) {
@@ -610,7 +607,9 @@ async function testConn() {
 
 // ── Helpers ─────────────────────────────────────────────
 function truncateContext(text, maxChars) {
+  // Rough truncation: 1 token ≈ 4 chars in Chinese, stay well under context limit
   if (!text || text.length <= maxChars) return text
+  // Cut at sentence boundary near maxChars
   const cut = text.slice(0, maxChars)
   const lastPeriod = cut.lastIndexOf('。')
   const lastNewline = cut.lastIndexOf('\n')
@@ -619,12 +618,16 @@ function truncateContext(text, maxChars) {
 }
 function fmt(t) {
   if (!t) return ''
+  // Step 1: escape ALL HTML entities FIRST (before any markdown transforms)
+  // This ensures raw HTML from the model cannot execute
   const esc = t
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+  // Step 2: safe markdown-to-HTML (only creates <strong>, <em>, <code>)
+  // These are safe even if source contains malicious text (already escaped above)
   return esc
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
@@ -641,6 +644,7 @@ function scroll() {
   nextTick(() => { if (msgEl.value) msgEl.value.scrollTop = msgEl.value.scrollHeight })
 }
 </script>
+
 <style>
 /* ── iOS Light Design System ──────────────────────────── */
 :root {
