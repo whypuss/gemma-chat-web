@@ -1,0 +1,7 @@
+*
+!dist/
+!dist/**
+!functions/
+!functions/**
+!.wrangler.toml
+!.cloudflareignore
