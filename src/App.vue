@@ -308,7 +308,7 @@ function trimCurrentChat() {
 
 // ── Persisted ────────────────────────────────────────────
 const connMode = ref('local')
-const localTunnelUrl = ref('https://investigation-barnes-falls-designing.trycloudflare.com')
+const localTunnelUrl = ref('https://moggy.moggy.ccwu.cc')
 const directApiUrl = ref('')
 const apiModel = ref('gemma-2-2b-it-abliterated-Q4_K_M.gguf')
 const maxTokens = ref(1024)
@@ -338,8 +338,8 @@ function load() {
     if (s.systemPrompt) systemPrompt.value = s.systemPrompt
   } catch {}
   // Migrate stale tunnel URLs
-  if (['https://ai.moggy.ccwu.cc', 'https://moggy.serveousercontent.com', 'https://moggy.moggy.ccwu.cc', 'https://776ff09a7a3a29.lhr.life'].includes(localTunnelUrl.value)) {
-    localTunnelUrl.value = 'https://investigation-barnes-falls-designing.trycloudflare.com'
+  if (['https://ai.moggy.ccwu.cc', 'https://moggy.serveousercontent.com', 'https://moggy.moggy.ccwu.cc', 'https://776ff09a7a3a29.lhr.life', 'https://investigation-barnes-falls-designing.trycloudflare.com'].includes(localTunnelUrl.value)) {
+    localTunnelUrl.value = 'https://moggy.moggy.ccwu.cc'
     save()
   }
 }
