@@ -558,7 +558,7 @@ async function sendMessage() {
 
     const startTime = Date.now()
 
-    const msgs = buildMessages(context)
+    const msgs = buildMsgs(context)
     researchPhase.value = 'streaming'
 
     await streamChat(msgs, reply, currentCtrl.signal, reqId)
@@ -585,11 +585,21 @@ async function sendMessage() {
   }
 }
 
-function buildMsgs(userText) {
+function buildMsgs(context) {
   const msgs = []
   if (systemPrompt.value) msgs.push({ role: 'system', content: systemPrompt.value })
   currentChat.value.filter(m => ['user','assistant'].includes(m.role) && m.text)
     .forEach(m => msgs.push({ role: m.role, content: m.text }))
+  // Inject research context into last user message
+  if (context) {
+    const lastIdx = msgs.length - 1
+    if (msgs[lastIdx]?.role === 'user') {
+      msgs[lastIdx] = {
+        role: 'user',
+        content: `資料庫參考內容：\n${context}\n\n用戶問題：${msgs[lastIdx].content}`
+      }
+    }
+  }
   return msgs
 }
 
