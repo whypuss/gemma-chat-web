@@ -32,4 +32,4 @@ jobs:
         run: cp -r functions/. dist/
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy ./dist --project-name=gemma-chat-web --commit-relocated
+        run: npx wrangler pages deploy ./dist --project-name=gemma-chat-web
