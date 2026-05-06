@@ -3,7 +3,6 @@ src
 .github
 .git
 *.toml
-*.json
 *.md
 *.yml
 phone
@@ -11,5 +10,4 @@ cors_proxy.py
 vite.config.js
 README.md
 package-lock.json
-dist/
 functions/
