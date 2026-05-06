@@ -4,8 +4,9 @@ export async function onRequest({ request, env }) {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // Proxy API requests to phone tunnel
-  const targetUrl = `${TARGET}${path}${url.search}`;
+  // Proxy API requests to phone tunnel (strip /api prefix)
+  const targetPath = path.replace(/^\/api/, '');
+  const targetUrl = `${TARGET}${targetPath}${url.search}`;
   
   const headers = {};
   request.headers.forEach((value, key) => {
