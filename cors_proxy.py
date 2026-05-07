@@ -77,12 +77,20 @@ def fetch_url_content(url, timeout=FETCH_TIMEOUT):
         return (url, "", str(e))
 
 
+_DDG_UAS = [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+]
+import random
+
 def search_ddg_html(query):
-    """Search DuckDuckGo HTML, return list of {title, url, snippet}."""
+    """Search DuckDuckGo HTML, return list of {title, url, snippet}. Rotates UA to avoid rate limits."""
     try:
         import httpx
         headers = {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+            'User-Agent': random.choice(_DDG_UAS),
             'Accept': 'text/html',
             'Accept-Language': 'en-US,en;q=0.9',
         }
@@ -115,17 +123,53 @@ def search_ddg_html(query):
         return []
 
 
+def search_wikipedia(query):
+    """Search Wikipedia API, return list of {title, url, snippet}. No API key needed."""
+    try:
+        import httpx
+        # Detect Chinese query → use zh.wikipedia; otherwise en.wikipedia
+        has_cjk = any('\u4e00' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff' for c in query)
+        wiki_base = "https://zh.wikipedia.org" if has_cjk else "https://en.wikipedia.org"
+        search_url = (f"{wiki_base}/w/api.php"
+                      f"?action=query&list=search&srsearch={quote(query)}"
+                      f"&utf8=&format=json&origin=*&srlimit=6")
+        headers = {'User-Agent': random.choice(_DDG_UAS)}
+        with httpx.Client(timeout=15, headers=headers) as client:
+            resp = client.get(search_url)
+            data = resp.json()
+        results = []
+        for item in data.get("query", {}).get("search", [])[:6]:
+            snippet = re.sub(r'<[^>]+>', '', item.get("snippet", "")).strip()
+            results.append({
+                "title": item.get("title", ""),
+                "url": f"{wiki_base}/wiki/{quote(item.get('title', ''))}",
+                "snippet": snippet
+            })
+        return results
+    except Exception as e:
+        return []
+
+
 # ─── Research pipeline ─────────────────────────────────────────────────────
 def run_research(query):
     """
     Hermes-style research pipeline:
-    1. Search DuckDuckGo
-    2. Fetch top pages in parallel
-    3. Extract readable content
-    4. Return enriched context
+    1. Search Wikipedia (primary — no rate limit, good for Chinese)
+    2. Fallback to DuckDuckGo (secondary)
+    3. Fetch top pages in parallel
+    4. Extract readable content
+    5. Return enriched context
     """
-    # Step 1: Search
-    results = search_ddg_html(query)
+    # Step 1: Try Wikipedia first, then DDG fallback
+    results = search_wikipedia(query)
+    if len(results) < 2:
+        ddg_results = search_ddg_html(query)
+        # Merge, dedupe by URL
+        seen_urls = {r["url"] for r in results}
+        for r in ddg_results:
+            if r["url"] not in seen_urls:
+                results.append(r)
+                seen_urls.add(r["url"])
     if not results:
         return {"query": query, "results": [], "context": "No search results found."}
 
