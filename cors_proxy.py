@@ -206,15 +206,27 @@ def run_research(query):
                 "content": "[Page content unavailable]"
             })
 
-    # Step 3: Build context string for LLM
+    # Step 3: Filter out low-quality sources (disambig pages, very short content)
+    DISAMBIG_KEYWORDS = ['may refer to', '可以指', '以下條目', 'disambig', '消歧義', 'disambiguation']
+    def is_good_source(item):
+        snippet_lower = (item.get('snippet') or '').lower()
+        for kw in DISAMBIG_KEYWORDS:
+            if kw.lower() in snippet_lower:
+                return False
+        return True
+
+    enriched = [r for r in enriched if is_good_source(r)]
+
+    # Step 4: Build context string — cap each source at 400 chars to avoid context overflow
+    MAX_SOURCE_CHARS = 400
     ctx_parts = [f"Research query: {query}\n"]
     for item in enriched:
         ctx_parts.append(f"\n--- Source: {item['title']} ---")
         ctx_parts.append(f"URL: {item['url']}")
-        if item['content'] and not item['content'].startswith('[Failed'):
-            ctx_parts.append(f"\n{item['content']}")
-        else:
-            ctx_parts.append(f"\n{item['snippet']}")
+        raw_content = (item['content'] if item['content'] and not item['content'].startswith('[Failed') else item['snippet']) or ''
+        # Truncate to MAX_SOURCE_CHARS to keep context lean for small models
+        content = raw_content[:MAX_SOURCE_CHARS] + ('...' if len(raw_content) > MAX_SOURCE_CHARS else '')
+        ctx_parts.append(f"\n{content}")
 
     context = "\n".join(ctx_parts)
 
